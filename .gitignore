@@ -1,0 +1,12 @@
+# Xcode
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+
+# Werkzeuge werden per Scripts/fetch-binaries.sh geladen (~260 MB)
+Binaries/
+
+# macOS
+.DS_Store
