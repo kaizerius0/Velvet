@@ -107,9 +107,12 @@ enum YtDlpInstaller {
         let staging = root.appendingPathComponent("yt-dlp.staging-\(UUID().uuidString)", isDirectory: true)
         defer { try? fileManager.removeItem(at: staging) }
 
+        // --noqtn: Wurde Velvet aus dem Internet geladen, trägt auch das gebündelte Archiv die
+        // Quarantäne-Markierung. ditto würde sie an yt-dlp weitergeben – und macOS beendet das
+        // nicht notarisierte yt-dlp dann sofort, obwohl Velvet selbst schon freigegeben wurde.
         let unpack = try await ProcessRunner.run(
             URL(fileURLWithPath: "/usr/bin/ditto"),
-            arguments: ["-x", "-k", archive.path, staging.path],
+            arguments: ["-x", "-k", "--noqtn", archive.path, staging.path],
             timeout: 180
         )
         guard unpack.succeeded else {

@@ -10,3 +10,6 @@ Binaries/
 
 # macOS
 .DS_Store
+
+# Release-DMGs (Scripts/make-release.sh)
+dist/
