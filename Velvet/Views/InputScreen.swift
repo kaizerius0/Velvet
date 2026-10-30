@@ -7,9 +7,13 @@ struct InputScreen: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var tools: ToolManager
     @EnvironmentObject private var queue: QueueViewModel
+    @EnvironmentObject private var library: LibraryViewModel
+    @EnvironmentObject private var history: HistoryStore
 
     @State private var isDropTargeted = false
     @State private var alertMessage: String?
+    /// Einträge, die schon vorhanden sind (Eintrags-ID → Fundstelle).
+    @State private var hits: [Int: DuplicateHit] = [:]
 
     private static let placeholder = """
     Füge hier deine Liste ein – zum Beispiel:
@@ -32,8 +36,8 @@ struct InputScreen: View {
 
                 HStack(alignment: .top, spacing: 16) {
                     editorCard
-                    PreviewCard(result: input.parsed)
-                        .frame(width: 320)
+                    PreviewCard(result: input.parsed, hits: hits)
+                        .frame(width: 340)
                 }
                 .frame(height: 440)
 
@@ -44,6 +48,10 @@ struct InputScreen: View {
             .padding(20)
         }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handleDrop)
+        .onAppear(perform: updateHits)
+        .onChange(of: input.parsed) { _ in updateHits() }
+        .onChange(of: library.revision) { _ in updateHits() }
+        .onChange(of: history.revision) { _ in updateHits() }
         .alert("Hinweis", isPresented: Binding(
             get: { alertMessage != nil || input.errorMessage != nil },
             set: { if !$0 { alertMessage = nil; input.errorMessage = nil } }
@@ -174,19 +182,53 @@ struct InputScreen: View {
             return "Die Werkzeuge müssen erst funktionieren (siehe Hinweis oben)."
         case .ready:
             if input.parsed.entries.isEmpty { return "Füge zuerst eine Liste ein." }
+            if let target = targetDescription { return "Speichert in \(target). Tastenkürzel: ⌘↩" }
             return "Nach dem Klick wählst du den Zielordner. Tastenkürzel: ⌘↩"
         }
+    }
+
+    /// „AUTO-STICK › Rock“, wenn ein Ziel in der Bibliothek gewählt ist.
+    private var targetDescription: String? {
+        guard library.status == .ready, let name = library.location?.shortName else { return nil }
+        switch settings.downloadTarget {
+        case .ask: return nil
+        case .libraryRoot: return "\(name) › Hauptordner"
+        case let .playlist(playlist): return "\(name) › \(playlist)"
+        }
+    }
+
+    private func updateHits() {
+        hits = DuplicateChecker(library: library, history: history).hits(for: input.parsed.entries)
     }
 
     private func startRun() {
         let result = input.parseNow()
         guard !result.entries.isEmpty, tools.isReady else { return }
-        guard let folder = FolderPicker.chooseDestination(startingAt: settings.lastDestination) else { return }
+        guard let folder = resolveDestination() else { return }
         guard FileManager.default.isWritableFile(atPath: folder.path) else {
             alertMessage = "In den Ordner „\(folder.lastPathComponent)“ kann Velvet nicht schreiben. Bitte wähle einen anderen Ordner."
             return
         }
-        queue.start(entries: result.entries, destination: folder)
+        // Was schon in der Bibliothek liegt, wird übersprungen (kann im Lauf trotzdem geladen werden).
+        var existing: [Int: String] = [:]
+        if settings.skipExisting, library.contains(folder) {
+            let found = DuplicateChecker(library: library, history: history).hits(for: result.entries)
+            for (id, hit) in found where hit.strength == .exact && hit.inCurrentLibrary {
+                existing[id] = hit.location
+            }
+        }
+        queue.start(entries: result.entries, destination: folder, existing: existing)
+    }
+
+    private func resolveDestination() -> URL? {
+        if library.status == .ready {
+            switch settings.downloadTarget {
+            case .ask: break
+            case .libraryRoot: return library.rootURL
+            case let .playlist(name): return library.folder(forPlaylist: name)
+            }
+        }
+        return FolderPicker.chooseDestination(startingAt: settings.lastDestination ?? library.rootURL)
     }
 
     // MARK: Drag & Drop außerhalb des Textfelds
@@ -207,6 +249,7 @@ struct InputScreen: View {
 /// Rechte Spalte: zeigt live, was aus der Liste erkannt wurde.
 struct PreviewCard: View {
     let result: ListParseResult
+    var hits: [Int: DuplicateHit] = [:]
 
     var body: some View {
         Card {
@@ -244,10 +287,16 @@ struct PreviewCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                    if !hits.isEmpty {
+                        Label(duplicateText, systemImage: "externaldrive.badge.checkmark")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(Array(result.entries.enumerated()), id: \.element.id) { index, entry in
-                                PreviewRow(number: index + 1, entry: entry)
+                                PreviewRow(number: index + 1, entry: entry, hit: hits[entry.id])
                             }
                         }
                     }
@@ -264,6 +313,15 @@ struct PreviewCard: View {
         .frame(maxHeight: .infinity)
     }
 
+    private var duplicateText: String {
+        let exact = hits.values.filter { $0.strength == .exact }.count
+        let similar = hits.count - exact
+        var parts: [String] = []
+        if exact > 0 { parts.append("\(exact) schon vorhanden") }
+        if similar > 0 { parts.append("\(similar) ähnlich") }
+        return parts.joined(separator: " · ")
+    }
+
     private var skippedText: String {
         var parts: [String] = []
         if result.duplicateCount > 0 { parts.append(Formatters.count(result.duplicateCount, "Duplikat entfernt", "Duplikate entfernt")) }
@@ -275,6 +333,7 @@ struct PreviewCard: View {
 private struct PreviewRow: View {
     let number: Int
     let entry: ParsedEntry
+    let hit: DuplicateHit?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -285,10 +344,26 @@ private struct PreviewRow: View {
             Image(systemName: symbol)
                 .font(.caption)
                 .foregroundStyle(entry.isLink ? Color.accentColor : .secondary)
-            Text(entry.displayText)
-                .font(.callout)
-                .lineLimit(2)
-                .help(entry.url?.absoluteString ?? entry.displayText)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.displayText)
+                    .font(.callout)
+                    .lineLimit(2)
+                    .help(entry.url?.absoluteString ?? entry.displayText)
+                if let hit {
+                    Label(hitText(hit), systemImage: hit.strength == .exact ? "checkmark.circle.fill" : "questionmark.circle")
+                        .font(.caption2)
+                        .foregroundStyle(hit.strength == .exact ? Color.green : Color.orange)
+                        .lineLimit(1)
+                        .help("„\(hit.title)“ – \(hit.location)")
+                }
+            }
+        }
+    }
+
+    private func hitText(_ hit: DuplicateHit) -> String {
+        switch hit.strength {
+        case .exact: return "Schon vorhanden: \(hit.location)"
+        case .similar: return "Ähnlich: „\(hit.title)“ in \(hit.location)"
         }
     }
 
@@ -298,9 +373,10 @@ private struct PreviewRow: View {
     }
 }
 
-/// Format, Qualität, Zielordner und Optionen.
+/// Format, Qualität, Ziel und Optionen.
 struct OptionsCard: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var library: LibraryViewModel
 
     var body: some View {
         Card {
@@ -337,17 +413,8 @@ struct OptionsCard: View {
                         .fixedSize()
                     }
                     GridRow {
-                        label("Zielordner")
-                        HStack(spacing: 6) {
-                            Image(systemName: "folder")
-                                .foregroundStyle(.secondary)
-                            Text("Wird beim Start abgefragt")
-                            if let last = settings.lastDestination {
-                                Text("· zuletzt „\(last.lastPathComponent)“")
-                                    .foregroundStyle(.secondary)
-                                    .help(last.path)
-                            }
-                        }
+                        label("Speichern in")
+                        TargetPicker()
                     }
                 }
 
@@ -356,7 +423,11 @@ struct OptionsCard: View {
                 HStack(spacing: 28) {
                     Toggle("Bestes Suchergebnis automatisch wählen", isOn: $settings.autoPickFirstResult)
                         .help("Spart Klicks bei langen Listen. Du kannst jedes Video danach trotzdem noch über „Andere Vorschläge“ ändern.")
-                    Toggle("Bereits Geladenes überspringen (\(settings.format.archiveFileName))", isOn: $settings.useArchive)
+                    if library.status == .ready {
+                        Toggle("Titel überspringen, die schon auf \(library.location?.shortName ?? "dem Stick") sind", isOn: $settings.skipExisting)
+                            .help("Velvet vergleicht die Liste mit den Dateien in der Bibliothek. Übersprungene Titel kannst du im Lauf trotzdem laden.")
+                    }
+                    Toggle("Archiv nutzen (\(settings.format.archiveFileName))", isOn: $settings.useArchive)
                         .help("Velvet merkt sich im Zielordner, welche Videos schon geladen wurden, und überspringt sie beim nächsten Mal.")
                 }
                 .toggleStyle(.checkbox)
@@ -368,5 +439,51 @@ struct OptionsCard: View {
         Text(text)
             .foregroundStyle(.secondary)
             .gridColumnAlignment(.trailing)
+    }
+}
+
+/// Ziel eines Laufs: eine Playlist auf dem Stick, dessen Hauptordner oder jedes Mal fragen.
+private struct TargetPicker: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var library: LibraryViewModel
+    @EnvironmentObject private var navigation: AppNavigation
+    @State private var showNewPlaylist = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if library.status == .ready {
+                Picker("Speichern in", selection: $settings.downloadTarget) {
+                    Text("\(library.location?.shortName ?? "Bibliothek") – Hauptordner").tag(AppSettings.Target.libraryRoot)
+                    ForEach(library.folderPlaylists) { playlist in
+                        Text("Playlist „\(playlist.name)“").tag(AppSettings.Target.playlist(playlist.name))
+                    }
+                    if case let .playlist(name) = settings.downloadTarget, !library.folderPlaylists.contains(where: { $0.name == name }) {
+                        Text("Playlist „\(name)“ (wird angelegt)").tag(settings.downloadTarget)
+                    }
+                    Divider()
+                    Text("Jedes Mal fragen …").tag(AppSettings.Target.ask)
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button {
+                    showNewPlaylist = true
+                } label: {
+                    Label("Neue Playlist", systemImage: "plus")
+                }
+            } else {
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text("Wird beim Start abgefragt")
+                Button("Stick als Ziel wählen …") { navigation.section = .library }
+                    .buttonStyle(.link)
+            }
+        }
+        .sheet(isPresented: $showNewPlaylist) {
+            NameSheet(title: "Neue Playlist", initial: "", confirm: "Anlegen") { name in
+                if let playlist = library.createPlaylist(named: name) {
+                    settings.downloadTarget = .playlist(playlist.name)
+                }
+            }
+        }
     }
 }

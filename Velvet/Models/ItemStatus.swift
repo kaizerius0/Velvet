@@ -4,12 +4,23 @@ enum SkipReason: Equatable, Sendable {
     case archived
     case alreadyExists
     case livestream
+    /// Liegt schon in der Bibliothek (Ort, z. B. „AUTO-STICK › Rock“).
+    case inLibrary(String)
 
     var text: String {
         switch self {
         case .archived: return "Übersprungen – bereits geladen (Archiv)"
         case .alreadyExists: return "Übersprungen – Datei ist schon vorhanden"
         case .livestream: return "Übersprungen – Livestreams werden nicht geladen"
+        case let .inLibrary(location): return "Übersprungen – schon vorhanden in \(location)"
+        }
+    }
+
+    /// Kann trotzdem geladen werden.
+    var canForce: Bool {
+        switch self {
+        case .archived, .inLibrary: return true
+        default: return false
         }
     }
 }

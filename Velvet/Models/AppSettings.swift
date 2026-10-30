@@ -13,6 +13,33 @@ final class AppSettings: ObservableObject {
         static let cookieBrowser = "cookieBrowser"
         static let autoUpdateYtDlp = "autoUpdateYtDlp"
         static let lastDestinationPath = "lastDestinationPath"
+        static let downloadTarget = "downloadTarget"
+        static let skipExisting = "skipExisting"
+    }
+
+    /// Wohin ein Lauf speichert: jedes Mal fragen, Hauptordner der Bibliothek oder eine Playlist.
+    enum Target: Hashable {
+        case ask
+        case libraryRoot
+        case playlist(String)
+
+        init(rawValue: String) {
+            if rawValue == "library-root" {
+                self = .libraryRoot
+            } else if rawValue.hasPrefix("playlist:") {
+                self = .playlist(String(rawValue.dropFirst("playlist:".count)))
+            } else {
+                self = .ask
+            }
+        }
+
+        var rawValue: String {
+            switch self {
+            case .ask: return "ask"
+            case .libraryRoot: return "library-root"
+            case let .playlist(name): return "playlist:\(name)"
+            }
+        }
     }
 
     private let defaults: UserDefaults
@@ -44,6 +71,13 @@ final class AppSettings: ObservableObject {
     @Published var lastDestinationPath: String? {
         didSet { defaults.set(lastDestinationPath, forKey: Key.lastDestinationPath) }
     }
+    @Published var downloadTarget: Target {
+        didSet { defaults.set(downloadTarget.rawValue, forKey: Key.downloadTarget) }
+    }
+    /// Titel überspringen, die schon in der Bibliothek liegen.
+    @Published var skipExisting: Bool {
+        didSet { defaults.set(skipExisting, forKey: Key.skipExisting) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -51,6 +85,7 @@ final class AppSettings: ObservableObject {
             Key.useArchive: true,
             Key.maxParallelDownloads: 2,
             Key.autoUpdateYtDlp: true,
+            Key.skipExisting: true,
         ])
         format = MediaFormat(rawValue: defaults.string(forKey: Key.format) ?? "") ?? .video
         videoQuality = VideoQuality(rawValue: defaults.string(forKey: Key.videoQuality) ?? "") ?? .p720
@@ -61,6 +96,8 @@ final class AppSettings: ObservableObject {
         cookieBrowser = CookieBrowser(rawValue: defaults.string(forKey: Key.cookieBrowser) ?? "") ?? .none
         autoUpdateYtDlp = defaults.bool(forKey: Key.autoUpdateYtDlp)
         lastDestinationPath = defaults.string(forKey: Key.lastDestinationPath)
+        downloadTarget = Target(rawValue: defaults.string(forKey: Key.downloadTarget) ?? "ask")
+        skipExisting = defaults.bool(forKey: Key.skipExisting)
     }
 
     var lastDestination: URL? {

@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var queue: QueueViewModel?
+    weak var history: HistoryStore?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // yt-dlp-Prozesse sollen nicht ohne die App weiterlaufen.
         RunningProcesses.shared.terminateAll()
+        history?.saveNow()
     }
 }
 

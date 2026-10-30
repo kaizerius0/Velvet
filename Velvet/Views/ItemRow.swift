@@ -82,9 +82,9 @@ struct ItemRow: View {
                 }
                 suggestionsButton
             case let .skipped(reason):
-                if reason == .archived {
-                    Button("Trotzdem laden") { queue.downloadIgnoringArchive(item) }
-                        .help("Lädt das Video erneut, obwohl es im Archiv steht.")
+                if reason.canForce {
+                    Button("Trotzdem laden") { queue.forceDownload(item) }
+                        .help("Lädt den Titel, obwohl er schon vorhanden ist.")
                 }
                 suggestionsButton
             case .failed:

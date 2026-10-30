@@ -46,6 +46,8 @@ final class QueueViewModel: ObservableObject {
 
     private let settings: AppSettings
     private let tools: ToolManager
+    private let history: HistoryStore
+    private let library: LibraryViewModel
     private var manager: DownloadManager?
     private var pendingSearches: [DownloadItem] = []
     private var activeSearchCount = 0
@@ -55,9 +57,11 @@ final class QueueViewModel: ObservableObject {
 
     private static let maxParallelSearches = 3
 
-    init(settings: AppSettings, tools: ToolManager) {
+    init(settings: AppSettings, tools: ToolManager, history: HistoryStore, library: LibraryViewModel) {
         self.settings = settings
         self.tools = tools
+        self.history = history
+        self.library = library
     }
 
     var hasRun: Bool { !items.isEmpty }
@@ -89,7 +93,8 @@ final class QueueViewModel: ObservableObject {
 
     // MARK: - Start
 
-    func start(entries: [ParsedEntry], destination: URL) {
+    /// - Parameter existing: Einträge, die schon in der Bibliothek liegen (Eintrags-ID → Ort) – sie werden übersprungen.
+    func start(entries: [ParsedEntry], destination: URL, existing: [Int: String] = [:]) {
         guard let paths = tools.paths, !entries.isEmpty else { return }
         reset()
         manager = DownloadManager(tools: paths)
@@ -100,7 +105,11 @@ final class QueueViewModel: ObservableObject {
         try? FileManager.default.removeItem(at: options.tempDirectory)
 
         items = entries.enumerated().map { DownloadItem(entry: $1, number: $0 + 1) }
-        for item in items {
+        for (entry, item) in zip(entries, items) {
+            if let location = existing[entry.id] {
+                item.status = .skipped(.inLibrary(location))
+                continue
+            }
             switch item.origin {
             case .search:
                 enqueueSearch(item)
@@ -210,11 +219,16 @@ final class QueueViewModel: ObservableObject {
         refresh()
     }
 
-    /// Lädt ein Video, obwohl es im Archiv steht.
-    func downloadIgnoringArchive(_ item: DownloadItem) {
+    /// Lädt ein Video, obwohl es im Archiv oder in der Bibliothek schon vorhanden ist.
+    func forceDownload(_ item: DownloadItem) {
         stopWork(of: item)
         item.ignoreArchive = true
-        queueDownload(item)
+        if item.sourceURL != nil {
+            queueDownload(item)
+        } else {
+            enqueueSearch(item)
+        }
+        refresh()
     }
 
     func retryAllFailed() {
@@ -456,6 +470,13 @@ final class QueueViewModel: ObservableObject {
             item.progress = 1
             item.outputFile = file
             if let videoID { item.videoID = videoID }
+            history.recordDownload(
+                title: item.chosen?.title ?? item.title ?? file.deletingPathExtension().lastPathComponent,
+                query: item.origin == .search ? item.originalText : item.label,
+                videoID: item.videoID,
+                sourceURL: item.sourceURL,
+                file: file
+            )
             replacePreviousFile(of: item)
         case let .success(.skipped(reason)):
             item.status = .skipped(reason)
@@ -489,8 +510,11 @@ final class QueueViewModel: ObservableObject {
         }
         guard let old = item.replacedFile, old != item.outputFile else { return }
         if FileManager.default.fileExists(atPath: old.path) {
-            try? FileManager.default.trashItem(at: old, resultingItemURL: nil)
+            // Auf Sticks endgültig löschen, auf dem Mac in den Papierkorb.
+            let permanently = VolumeService.volume(containing: old)?.isExternal ?? false
+            try? LibraryFiles.remove(old, permanently: permanently)
         }
+        history.markRemoved(old, state: .replaced, note: item.outputFile.map { "Ersetzt durch „\($0.deletingPathExtension().lastPathComponent)“" })
         if let oldID = item.replacedVideoID, oldID != item.videoID, let options, options.useArchive {
             DownloadManager.removeFromArchive(videoID: oldID, archive: options.archiveURL)
         }
@@ -567,6 +591,7 @@ final class QueueViewModel: ObservableObject {
             if !didAnnounceFinish {
                 didAnnounceFinish = true
                 cleanUpTemporaryFiles()
+                if let destination { library.refreshIfAffected(by: destination) }
                 if NSApp?.isActive == false { NSApp?.requestUserAttention(.informationalRequest) }
             }
         } else {

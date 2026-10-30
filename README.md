@@ -1,6 +1,6 @@
 # Velvet
 
-**Liste rein, Videos raus.** Velvet ist eine native macOS-App (SwiftUI), die aus einer beliebig formatierten Liste von YouTube-Titeln oder -Links mit wenigen Klicks MP4-Videos oder MP3-Dateien in einen Ordner deiner Wahl lädt.
+**Liste rein, Musik auf den Stick.** Velvet ist eine native macOS-App (SwiftUI), die aus einer beliebig formatierten Liste von YouTube-Titeln oder -Links mit wenigen Klicks MP3-Dateien oder MP4-Videos lädt – und deinen USB-Stick fürs Auto wie eine Musik-App verwaltet.
 
 - Liste einfach reinkopieren – Nummern, Spiegelstriche, Emojis, Zeitstempel, Markdown, Tabellen und Zusatztext werden automatisch herausgefiltert
 - Bei Titeln zeigt Velvet **5 Vorschläge** (Vorschaubild, Titel, Kanal, Dauer, Aufrufe) – Klick = laden
@@ -9,13 +9,34 @@
 - Fortschritt pro Eintrag und gesamt, mehrere Downloads gleichzeitig, Fehler stoppen den Lauf nicht
 - Archiv: bereits Geladenes wird beim nächsten Mal übersprungen
 - Am Ende: Zusammenfassung + „Ordner im Finder öffnen“
+- **Bibliothek:** Stick (oder Ordner) wählen – Ordner sind Playlists. Titel umbenennen, verschieben, löschen, **gegen eine andere Version austauschen** (z. B. Extended), Stick fürs Auto aufräumen und auswerfen
+- **Verlauf:** was du wann wohin geladen hast – und ob es noch da ist
+- **Keine Doppelten:** schon vorhandene Titel werden in der Liste markiert und beim Laden übersprungen
 - Komplett auf Deutsch, Hell- und Dunkelmodus
 
 yt-dlp, ffmpeg, ffprobe und deno sind **in der App enthalten** – nichts muss installiert werden.
 
-| Liste einfügen | Video auswählen (Dunkelmodus) | Fertig |
+| Liste einfügen – mit „schon vorhanden“ | Video auswählen (Dunkelmodus) | Fertig |
 |---|---|---|
 | ![Eingabe](Docs/eingabe.png) | ![Auswahl](Docs/auswahl-dunkel.png) | ![Fertig](Docs/fertig.png) |
+
+| Bibliothek – der Stick mit Playlists | Verlauf |
+|---|---|
+| ![Bibliothek](Docs/bibliothek.png) | ![Verlauf](Docs/verlauf.png) |
+
+---
+
+## Herunterladen (ohne Xcode)
+
+Die fertige App gibt es unter **[Releases](https://github.com/kaizerius0/Velvet/releases/latest)** als `Velvet-<Version>.dmg` – für Macs mit Apple-Chip (M1 oder neuer) ab macOS 13.
+
+1. DMG laden, öffnen und **Velvet** auf **Programme** ziehen.
+2. Velvet in Programme öffnen. macOS meldet beim ersten Mal „„Velvet“ wurde nicht geöffnet“ → **Fertig**.
+3. **Systemeinstellungen → Datenschutz & Sicherheit** → ganz unten bei „„Velvet“ wurde blockiert …“ auf **Dennoch öffnen** klicken und bestätigen.
+
+Das ist nur einmal nötig: Velvet ist nicht bei Apple notarisiert (dafür bräuchte es ein kostenpflichtiges Entwicklerkonto). Alternativ im Terminal: `xattr -dr com.apple.quarantine /Applications/Velvet.app`
+
+Eine neue DMG baut `Scripts/make-release.sh` (Ergebnis in `dist/`).
 
 ---
 
@@ -50,15 +71,32 @@ Beim **allerersten Start** prüft Velvet die Werkzeuge und entpackt yt-dlp nach 
 
 1. **Liste einfügen** – ins große Textfeld kopieren, per **„Liste aus .txt-Datei laden …“** (⌘O) öffnen oder eine `.txt`-Datei aufs Fenster ziehen. Rechts siehst du sofort, was Velvet erkannt hat.
 2. **Format und Qualität wählen** – Video (MP4) oder Nur Audio (MP3).
-3. **„Alle starten“** (⌘↩) – Velvet fragt nach dem Zielordner (bei jedem Lauf neu).
-4. **Auswählen** – Links laden sofort. Für jeden Titel erscheinen 5 Karten; ein Klick auf die passende Karte startet den Download.
+3. **Ziel wählen** – unter „Speichern in“ eine Playlist auf deinem Stick (oder „Neue Playlist“). Ohne Stick bzw. mit „Jedes Mal fragen …“ fragt Velvet beim Start nach dem Ordner.
+4. **„Alle starten“** (⌘↩).
+5. **Auswählen** – Links laden sofort. Für jeden Titel erscheinen 5 Karten; ein Klick auf die passende Karte startet den Download.
    - Falsches Video? **„Andere Vorschläge“** zeigt 5 neue Treffer. Das bereits geladene falsche Video wird nach dem neuen Download in den Papierkorb gelegt.
    - Alles falsch? **„Eigenen Link eingeben …“**
    - Suchbegriff unpassend? Oben in der Auswahl anpassen und **„Suchen“**.
    - Hover über eine Karte → ▶︎-Knopf öffnet das Video zum Prüfen im Browser.
-5. **Fertig** – die Zusammenfassung zeigt Geladenes, Übersprungenes und Fehler mit Grund. **„Ordner im Finder öffnen“** bringt dich direkt zu den Dateien.
+6. **Fertig** – die Zusammenfassung zeigt Geladenes, Übersprungenes und Fehler mit Grund. **„Ordner im Finder öffnen“** bringt dich direkt zu den Dateien.
 
 Tipp für lange Listen: **„Bestes Suchergebnis automatisch wählen“** – Velvet nimmt jeweils den ersten Treffer, du kannst danach trotzdem jeden Eintrag über „Andere Vorschläge“ korrigieren.
+
+### Stick & Bibliothek – Velvet als Musik-App fürs Auto
+
+1. Stick einstecken → in der Seitenleiste unter **Laufwerk** den Stick wählen. Velvet merkt ihn sich und öffnet ihn beim nächsten Einstecken automatisch – auch wenn er unter einem anderen Namen eingehängt wird.
+2. **Bibliothek** (⌘2) zeigt alle Titel. Jeder Ordner auf dem Stick ist eine **Playlist**; links auswählen, rechts die Titel.
+   - **Rechtsklick** (oder Leiste unten bei Auswahl): Abspielen, **Austauschen …**, Umbenennen, **Verschieben nach** (andere Playlist), Im Finder zeigen, Löschen.
+   - **Austauschen:** Velvet sucht passende Versionen (Schnellknöpfe „Extended“, „Live“, „Remix“ …), lädt die gewählte in denselben Ordner und löscht danach die alte Datei. Schlägt der Download fehl, bleibt die alte Datei erhalten.
+   - **Neue Playlist** unten links, Playlists per Rechtsklick umbenennen oder löschen.
+3. **„Für das Auto aufräumen“** (Menü **…** oben rechts) entfernt die unsichtbaren Mac-Begleitdateien (`._Titel.mp3`, `.DS_Store`), die viele Autoradios als kaputte Titel anzeigen.
+4. **Auswerfen** in der Seitenleiste – dann kann der Stick ab.
+
+Auf dem Stick löscht Velvet **endgültig** (ein Papierkorb auf dem Stick würde im Auto nur stören) und fragt vorher nach. In Ordnern auf dem Mac landet Gelöschtes im Papierkorb.
+
+**Keine Doppelten:** Schon beim Einfügen der Liste zeigt die Vorschau rechts, was es schon gibt – „Schon vorhanden: AUTO-STICK › Rock“ (grün) oder „Ähnlich: „Toto - Africa““ (orange, z. B. wenn du die Extended Version suchst). Mit dem Häkchen **„Titel überspringen, die schon auf … sind“** lädt Velvet sie nicht noch einmal; im Lauf geht's per **„Trotzdem laden“** doch.
+
+**Verlauf** (⌘3): jeder Download mit Datum, Titel, Ort (Stick › Playlist) und Status – *Vorhanden*, *Stick nicht verbunden*, *Nicht mehr da*, *Ersetzt durch …* oder *Gelöscht*. Per Rechtsklick abspielen, im Finder zeigen, auf YouTube öffnen oder erneut laden. Der Verlauf liegt in `~/Library/Application Support/Velvet/history.json`.
 
 ### Was Velvet aus einer Liste erkennt
 
@@ -86,13 +124,14 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 - Videos: `Titel.mp4` (H.264/AAC bevorzugt – läuft in QuickTime, Fotos, iPhone). Bei „Beste“ kann es VP9/AV1 sein.
 - Audio: `Titel.mp3` mit Cover, Interpret und Titel als Tags (aus „Interpret - Titel“ abgeleitet).
 - Zwischendateien liegen versteckt in `.velvet-temp` im Zielordner und verschwinden am Ende.
-- Das Archiv liegt im Zielordner: `archive.txt` (MP4) bzw. `archive-mp3.txt` (MP3). Steht ein Video darin, wird es übersprungen. Ein Eintrag lässt sich trotzdem laden: **„Trotzdem laden“** – oder das Häkchen „Bereits Geladenes überspringen“ abschalten.
+- Das Archiv liegt im Zielordner: `archive.txt` (MP4) bzw. `archive-mp3.txt` (MP3). Steht ein Video darin, wird es übersprungen. Ein Eintrag lässt sich trotzdem laden: **„Trotzdem laden“** – oder das Häkchen „Archiv nutzen“ abschalten.
 
 ---
 
 ## Einstellungen (⌘,)
 
 - **Gleichzeitige Downloads** (1–4, Standard 2)
+- **Speichern in** und **Titel überspringen, die schon vorhanden sind** – direkt im Downloads-Bereich
 - **Bestes Suchergebnis automatisch wählen**
 - **Bereits Geladenes überspringen** (Archiv)
 - **Cookies aus Browser** – nur nötig für altersbeschränkte Videos oder wenn YouTube eine Bot-Prüfung verlangt. Du musst im Browser bei YouTube angemeldet sein; Safari braucht dafür „Festplattenvollzugriff“ für Velvet.
@@ -113,19 +152,25 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 
 ```
 Velvet/
-├─ App/            VelvetApp (Fenster, Menübefehle), AppDelegate (Beenden-Abfrage, Prozesse aufräumen)
-├─ Models/         DownloadItem, ItemStatus, DownloadOptions, VideoCandidate, AppSettings, Formatters
+├─ App/            VelvetApp (Fenster, Menübefehle), AppDelegate (Beenden-Abfrage, Prozesse aufräumen), AppNavigation
+├─ Models/         DownloadItem, ItemStatus, DownloadOptions, VideoCandidate, AppSettings, Formatters,
+│                  Library (VolumeInfo, LibraryLocation, Playlist, Track, HistoryEntry, DuplicateHit)
 ├─ Services/       DownloadManager   – yt-dlp: Suche, Playlists, Downloads, Live-Fortschritt
 │                  ProcessRunner     – startet Prozesse, liefert Ausgabe zeilenweise, Abbruch & Timeout
 │                  ToolManager       – findet/prüft yt-dlp, ffmpeg, ffprobe, deno beim Start
 │                  YtDlpInstaller    – entpackt & aktualisiert yt-dlp (SHA-256-geprüft)
 │                  YTDLPOutput       – liest Fortschritts-/Info-Zeilen, JSON, übersetzt Fehler ins Deutsche
 │                  ListParser        – macht aus beliebigem Text eine saubere Liste
+│                  HistoryStore      – Verlauf (JSON), findet Dateien auch auf umbenannten Sticks
+│                  LibraryFiles      – Playlists einlesen, umbenennen, verschieben, löschen, fürs Auto aufräumen
+│                  VolumeService     – Sticks erkennen und auswerfen
+│                  TitleMatcher, DuplicateChecker – „schon vorhanden?“ (gleich / ähnlich)
 │                  YouTubeLink, TextFileLoader
-├─ ViewModels/     InputViewModel (Eingabe), QueueViewModel (Suche, Auswahl, Warteschlange, Zusammenfassung)
-└─ Views/          InputScreen, QueueScreen, ItemRow, CandidatePicker, ManualLinkSheet, SettingsView, …
+├─ ViewModels/     InputViewModel (Eingabe), QueueViewModel (Suche, Auswahl, Warteschlange, Zusammenfassung),
+│                  LibraryViewModel (Stick & Playlists), ReplaceViewModel (Titel austauschen)
+└─ Views/          ContentView (Seitenleiste), InputScreen, QueueScreen, LibraryScreen, HistoryScreen, ReplaceSheet, …
 Binaries/          yt-dlp_macos.zip, ffmpeg, ffprobe, deno (per Script geladen)
-Scripts/           fetch-binaries.sh
+Scripts/           fetch-binaries.sh, install.sh, make-release.sh
 VelvetTests/       Parser-, Ausgabe-, Integrations- und UI-Ablauf-Tests
 ```
 

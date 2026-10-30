@@ -20,7 +20,8 @@ xcodebuild -project "$ROOT/Velvet.xcodeproj" -scheme Velvet -configuration Relea
     -derivedDataPath "$BUILD" build -quiet
 
 # Läuft die installierte App, wird sie zuerst beendet – sie fragt selbst nach, falls noch Downloads laufen.
-is_running() { pgrep -f "$DEST/Contents/MacOS/Velvet" >/dev/null; }
+# Nur Prozesse, deren Befehl mit dem App-Pfad beginnt – nicht etwa Shells, die den Pfad nur erwähnen.
+is_running() { pgrep -f "^$DEST/Contents/MacOS/Velvet" >/dev/null; }
 if is_running; then
     log "Velvet läuft – App wird beendet …"
     osascript -e 'tell application id "de.velvet.Velvet" to quit' >/dev/null 2>&1 || true

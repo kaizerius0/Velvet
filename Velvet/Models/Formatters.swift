@@ -20,9 +20,41 @@ enum Formatters {
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.allowedUnits = [.useKB, .useMB, .useGB, .useTB]
         return formatter
     }()
+
+    static func bytes(_ count: Int64) -> String {
+        byteFormatter.string(fromByteCount: max(count, 0))
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
+
+    /// „Heute, 14:05“ / „12.03.2026, 09:30“
+    static func dateTime(_ date: Date) -> String {
+        dateFormatter.string(from: date)
+    }
+
+    /// „Heute“ / „12.03.2026“
+    static func date(_ date: Date) -> String {
+        shortDateFormatter.string(from: date)
+    }
 
     static func speed(_ bytesPerSecond: Double?) -> String? {
         guard let bytesPerSecond, bytesPerSecond.isFinite, bytesPerSecond > 0 else { return nil }
