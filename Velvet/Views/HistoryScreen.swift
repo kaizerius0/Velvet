@@ -6,6 +6,7 @@ struct HistoryScreen: View {
     @EnvironmentObject private var history: HistoryStore
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
+    @EnvironmentObject private var settings: AppSettings
 
     enum Filter: String, CaseIterable, Identifiable {
         case all, present, gone
@@ -141,18 +142,26 @@ struct HistoryScreen: View {
         }
     }
 
-    /// Lädt die Titel erneut – in ihren alten Ordner, sonst in den Musikordner auf dem Mac.
+    /// Lädt die Titel erneut – in ihren alten Ordner, sonst in den Ordner, der unter „Hinzufügen“ gewählt ist.
     private func reload(_ rows: [Row]) {
+        var fallback = settings.addTarget
         for row in rows {
             let entry = row.entry
             let text = entry.sourceURL ?? entry.query ?? entry.title
             guard let parsed = ListParser.parse(text).entries.first else { continue }
-            var folder = library.macFolder
+            var folder: URL?
             if let original = history.resolvedURL(for: entry, volumes: library.volumes)?.deletingLastPathComponent(),
                FileManager.default.fileExists(atPath: original.path) {
                 folder = original
+            } else {
+                if fallback == nil {
+                    fallback = library.chooseFolder(title: "Wohin sollen die Titel?")
+                    if fallback == nil { return }
+                    settings.addTarget = fallback
+                }
+                folder = fallback
             }
-            queue.add(entries: [parsed], to: folder)
+            if let folder { queue.add(entries: [parsed], to: folder) }
         }
     }
 

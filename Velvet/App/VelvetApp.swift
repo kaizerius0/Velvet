@@ -61,8 +61,8 @@ struct VelvetCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("Neue Playlist") {
-                navigation.newPlaylistSource = navigation.sourceID ?? LibrarySource.macID
+            Button("Neuer Ordner …") {
+                navigation.newFolderSource = navigation.sourceID ?? LibrarySource.macID
             }
             .keyboardShortcut("n")
 

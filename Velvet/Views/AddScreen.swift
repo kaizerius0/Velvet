@@ -15,7 +15,6 @@ struct AddScreen: View {
 
     @State private var hits: [Int: DuplicateHit] = [:]
     @State private var isDropTargeted = false
-    @State private var newPlaylistSource: String?
 
     private static let placeholder = """
     Queen – Bohemian Rhapsody
@@ -53,21 +52,8 @@ struct AddScreen: View {
         .onChange(of: input.parsed) { _ in updateHits() }
         .onChange(of: library.revision) { _ in updateHits() }
         .onChange(of: history.revision) { _ in updateHits() }
-        .onChange(of: settings.addTargetSource) { _ in updateHits() }
-        .sheet(item: Binding(
-            get: { newPlaylistSource.map(SourceRef.init) },
-            set: { newPlaylistSource = $0?.id }
-        )) { ref in
-            NameSheet(title: "Neue Playlist", initial: "", confirm: "Erstellen") { name in
-                if let playlist = library.createPlaylist(named: name, in: ref.id) {
-                    settings.addTargetSource = ref.id
-                    settings.addTargetPlaylist = playlist.name
-                }
-            }
-        }
+        .onChange(of: settings.addTargetPath) { _ in updateHits() }
     }
-
-    private struct SourceRef: Identifiable { let id: String }
 
     // MARK: Eingabe
 
@@ -174,38 +160,48 @@ struct AddScreen: View {
     private var targetMenu: some View {
         Menu {
             ForEach(library.sources) { source in
-                Section(source.name) {
-                    Button("Hauptordner") { setTarget(source.id, playlist: "") }
-                    ForEach(library.playlists(in: source.id).filter { !$0.isRoot }) { playlist in
-                        Button(playlist.name) { setTarget(source.id, playlist: playlist.name) }
+                let folders = library.folders(in: source.id)
+                if !folders.isEmpty {
+                    Section(source.name) {
+                        ForEach(folders) { folder in
+                            Button {
+                                settings.addTarget = folder.url
+                            } label: {
+                                Label(folder.name, systemImage: folder.isVolumeRoot ? "externaldrive" : "folder")
+                            }
+                        }
                     }
-                    Button("Neue Playlist …") { newPlaylistSource = source.id }
                 }
             }
+            Divider()
+            Button("Anderer Ordner …") { chooseTarget() }
         } label: {
-            Label(targetText, systemImage: library.source(id: targetSourceID)?.isExternal == true ? "externaldrive" : "music.note.list")
+            Label(targetText, systemImage: targetSymbol)
         }
         .fixedSize()
         .help("Hierhin kommen die neuen Titel")
     }
 
-    /// Ist der gewählte Stick nicht eingesteckt, geht es in den Musikordner auf dem Mac.
-    private var targetSourceID: String {
-        library.source(id: settings.addTargetSource) == nil ? LibrarySource.macID : settings.addTargetSource
+    private var target: URL? { settings.addTarget }
+
+    private var targetSourceID: String? {
+        target.flatMap { library.source(containing: $0)?.id }
     }
 
     private var targetText: String {
-        let name = library.source(id: targetSourceID)?.name ?? "Mac"
-        return settings.addTargetPlaylist.isEmpty ? name : "\(name) › \(settings.addTargetPlaylist)"
+        target.map { library.locationText(forFolder: $0) } ?? "Ordner wählen …"
     }
 
-    private var targetFolder: URL? {
-        library.folder(forPlaylist: settings.addTargetPlaylist, in: targetSourceID)
+    private var targetSymbol: String {
+        guard let target else { return "folder.badge.questionmark" }
+        return library.isOnStick(target) ? "externaldrive" : "folder"
     }
 
-    private func setTarget(_ sourceID: String, playlist: String) {
-        settings.addTargetSource = sourceID
-        settings.addTargetPlaylist = playlist
+    @discardableResult
+    private func chooseTarget() -> URL? {
+        guard let url = library.chooseFolder(title: "Wohin sollen die Titel?", startingAt: target) else { return nil }
+        settings.addTarget = url
+        return url
     }
 
     private var entriesToAdd: [ParsedEntry] {
@@ -229,7 +225,8 @@ struct AddScreen: View {
     private func add() {
         input.parseNow()
         let entries = entriesToAdd
-        guard !entries.isEmpty, let folder = targetFolder else { return }
+        // Noch kein Ordner gewählt (oder der Stick ist abgezogen): erst fragen.
+        guard !entries.isEmpty, let folder = target ?? chooseTarget() else { return }
         queue.add(entries: entries, to: folder)
         input.clear()
     }
@@ -318,7 +315,7 @@ private struct PreviewRow: View {
     }
 }
 
-/// Ein Titel auf dem Weg in die Playlist – mit Fortschritt, Auswahl per Wischen oder Aktionen.
+/// Ein Titel auf dem Weg in seinen Ordner – mit Fortschritt, Auswahl per Wischen oder Aktionen.
 struct AddItemCard: View {
     @ObservedObject var item: DownloadItem
 
@@ -410,7 +407,7 @@ struct AddItemCard: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
             default:
                 let checker = DuplicateChecker(library: library, history: history,
-                                               sourceID: library.source(containing: item.destination)?.id ?? LibrarySource.macID)
+                                               sourceID: library.source(containing: item.destination)?.id)
                 CandidateCarousel(
                     candidates: item.candidates,
                     isLoadingMore: item.isLoadingMore,
@@ -441,7 +438,7 @@ struct AddItemCard: View {
         HStack(spacing: 8) {
             switch item.status {
             case .completed:
-                Button("In Playlist zeigen", action: showInPlaylist)
+                Button("Im Ordner zeigen", action: showInFolder)
                 if item.canSuggest {
                     Button("Andere Version") { queue.showMoreSuggestions(for: item) }
                 }
@@ -487,13 +484,13 @@ struct AddItemCard: View {
         .fixedSize()
     }
 
-    private func showInPlaylist() {
-        guard let source = library.source(containing: item.destination) else { return }
+    /// Ordner, die nicht in der Seitenleiste stehen, zeigt der Finder.
+    private func showInFolder() {
         let folder = item.destination.standardizedFileURL
-        if folder == source.rootURL.standardizedFileURL {
-            navigation.selection = .allTracks(source: source.id)
+        if let source = library.source(containing: folder), library.folder(id: folder.path, in: source.id) != nil {
+            navigation.selection = .folder(source: source.id, id: folder.path)
         } else {
-            navigation.selection = .playlist(source: source.id, id: folder.path)
+            library.reveal([item.outputFile ?? folder])
         }
     }
 }

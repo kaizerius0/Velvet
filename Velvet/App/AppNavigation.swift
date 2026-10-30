@@ -6,29 +6,28 @@ final class AppNavigation: ObservableObject {
     enum Item: Hashable {
         /// Titel suchen und hinzufügen – einer oder eine ganze Liste.
         case add
-        /// Alle Titel einer Bibliothek (Mac oder Stick).
+        /// Alle Titel eines Sticks.
         case allTracks(source: String)
-        /// Eine Playlist (Ordner) einer Bibliothek.
-        case playlist(source: String, id: String)
+        /// Ein Ordner auf dem Mac oder einem Stick.
+        case folder(source: String, id: String)
         case history
     }
 
     @Published var selection: Item? = .add
-    /// Menübefehle, die eine Ansicht öffnen soll.
-    /// Bibliothek, in der eine neue Playlist angelegt werden soll.
-    @Published var newPlaylistSource: String?
+    /// Bibliothek, in der ein neuer Ordner angelegt werden soll (aus dem Menü).
+    @Published var newFolderSource: String?
     /// Setzt den Cursor ins Eingabefeld von „Hinzufügen“.
     @Published var focusInput = UUID()
 
     var sourceID: String? {
         switch selection {
-        case let .allTracks(source), let .playlist(source, _): return source
+        case let .allTracks(source), let .folder(source, _): return source
         case .add, .history, .none: return nil
         }
     }
 
-    var playlistID: String? {
-        if case let .playlist(_, id) = selection { return id }
+    var folderID: String? {
+        if case let .folder(_, id) = selection { return id }
         return nil
     }
 }

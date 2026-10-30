@@ -14,7 +14,7 @@ final class DownloadItem: ObservableObject, Identifiable {
     let origin: Origin
     /// Der ursprüngliche Text (Suchbegriff oder Link).
     let originalText: String
-    /// Ordner (Playlist), in den der Titel geladen wird.
+    /// Ordner, in den der Titel geladen wird.
     let destination: URL
     let options: DownloadOptions
 

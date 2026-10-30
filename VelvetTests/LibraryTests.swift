@@ -44,12 +44,22 @@ final class LibraryFilesTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
-    func testScanFindsPlaylistsAndMediaOnly() {
-        let snapshot = LibraryFiles.scan(root: root)
-        XCTAssertEqual(snapshot.playlists.map(\.displayName), ["Hauptordner", "Party", "Rock"])
-        XCTAssertEqual(snapshot.playlists.first { $0.name == "Rock" }?.trackCount, 2)
+    func testStickScanFindsFoldersAndMediaOnly() {
+        let snapshot = LibraryFiles.scanVolume(root: root, name: "AUTO-STICK")
+        // Der Stick selbst heißt wie der Stick – keinen „Hauptordner“.
+        XCTAssertEqual(snapshot.folders.map(\.name), ["AUTO-STICK", "Party", "Rock"])
+        XCTAssertEqual(snapshot.folders.map(\.isVolumeRoot), [true, false, false])
+        XCTAssertEqual(snapshot.folders.first { $0.name == "Rock" }?.trackCount, 2)
         XCTAssertEqual(Set(snapshot.tracks.map(\.title)), ["Toto - Africa", "Queen - Bohemian Rhapsody", "Daft Punk - Get Lucky", "Einzeln"])
+        XCTAssertEqual(snapshot.tracks.first { $0.title == "Einzeln" }?.folderName, "AUTO-STICK")
         XCTAssertEqual(snapshot.tracks.first { $0.title == "Daft Punk - Get Lucky" }?.isAudio, false)
+    }
+
+    func testMacScanReadsOnlyChosenFolders() {
+        let snapshot = LibraryFiles.scan(folders: [root.appendingPathComponent("Rock"), root.appendingPathComponent("Gibt es nicht")])
+        XCTAssertEqual(snapshot.folders.map(\.name), ["Rock"])
+        XCTAssertEqual(Set(snapshot.tracks.map(\.title)), ["Toto - Africa", "Queen - Bohemian Rhapsody"])
+        XCTAssertEqual(Set(snapshot.tracks.map(\.folderName)), ["Rock"])
     }
 
     func testRenameMoveAndRemove() throws {
@@ -118,10 +128,10 @@ final class HistoryAndDuplicateTests: XCTestCase {
     func testDuplicatesInLibraryAndHistory() async throws {
         let defaults = UserDefaults(suiteName: "velvet-library-tests-\(UUID().uuidString)")!
         let history = HistoryStore(fileURL: historyFile)
-        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
+        let library = LibraryViewModel(history: history, defaults: defaults, macFolders: [root.appendingPathComponent("Rock")])
         try await waitForScan(library)
         XCTAssertEqual(library.tracks(in: LibrarySource.macID).count, 1)
-        XCTAssertEqual(library.locationText(for: root.appendingPathComponent("Rock/x.mp3")), "Mac › Rock")
+        XCTAssertEqual(library.locationText(for: root.appendingPathComponent("Rock/x.mp3")), "Rock")
 
         // Ein Video, das woanders auf dem Mac liegt (laut Verlauf).
         let elsewhere = FileManager.default.temporaryDirectory.appendingPathComponent("velvet-elsewhere-\(UUID().uuidString).mp3")
@@ -141,7 +151,7 @@ final class HistoryAndDuplicateTests: XCTestCase {
 
         XCTAssertEqual(hits[0]?.strength, .exact)
         XCTAssertEqual(hits[0]?.inCurrentLibrary, true)
-        XCTAssertTrue(hits[0]?.location.hasSuffix("› Rock") ?? false, hits[0]?.location ?? "-")
+        XCTAssertEqual(hits[0]?.location, "Rock")
         XCTAssertEqual(hits[1]?.strength, .similar)
         XCTAssertEqual(hits[2]?.strength, .exact)
         XCTAssertEqual(hits[2]?.inCurrentLibrary, false)
@@ -150,32 +160,57 @@ final class HistoryAndDuplicateTests: XCTestCase {
         // Einzelne Suchergebnisse: gleicher Titel in dieser Bibliothek → „Schon in …“
         let candidate = VideoCandidate(id: "FTQbiNvZqaY", title: "Toto - Africa (Official HD Video)", channel: "TOTO", duration: 295,
                                        viewCount: nil, thumbnailURL: nil, url: YouTubeLink.watchURL("FTQbiNvZqaY"))
-        XCTAssertEqual(checker.existingLocation(of: candidate), "Mac › Rock")
+        XCTAssertEqual(checker.existingLocation(of: candidate), "Rock")
         let other = VideoCandidate(id: "abcdefghijk", title: "Toto - Rosanna", channel: nil, duration: nil,
                                    viewCount: nil, thumbnailURL: nil, url: YouTubeLink.watchURL("abcdefghijk"))
         XCTAssertNil(checker.existingLocation(of: other))
     }
 
-    func testPlaylistOperationsAcrossLibraries() async throws {
+    func testFolderOperations() async throws {
         let defaults = UserDefaults(suiteName: "velvet-library-tests-\(UUID().uuidString)")!
         let history = HistoryStore(fileURL: historyFile)
-        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
+        let rockURL = root.appendingPathComponent("Rock")
+        let library = LibraryViewModel(history: history, defaults: defaults, macFolders: [rockURL])
         try await waitForScan(library)
 
-        let party = try XCTUnwrap(library.createPlaylist(named: "Party", in: LibrarySource.macID))
+        // Ein neuer Ordner auf dem Mac kommt in die Seitenleiste.
+        let party = try XCTUnwrap(library.createFolder(named: "Party", in: root))
+        XCTAssertTrue(library.isMacFolder(party.url))
+        XCTAssertEqual(defaults.stringArray(forKey: "macFolders")?.count, 2)
         try await waitForRevision(library, after: library.revision)
         let africa = try XCTUnwrap(library.tracks(in: LibrarySource.macID).first)
         let before = library.revision
         library.move([africa], to: party)
         try await waitForRevision(library, after: before)
-        XCTAssertEqual(library.tracks(in: LibrarySource.macID, playlistID: party.id).map(\.title), ["Toto - Africa (Official HD Video)"])
+        XCTAssertEqual(library.tracks(in: LibrarySource.macID, folderID: party.id).map(\.title), ["Toto - Africa (Official HD Video)"])
 
-        let rock = try XCTUnwrap(library.playlists(in: LibrarySource.macID).first { $0.name == "Rock" })
-        let moved = try XCTUnwrap(library.tracks(in: LibrarySource.macID, playlistID: party.id).first)
+        let rock = try XCTUnwrap(library.folders(in: LibrarySource.macID).first { $0.name == "Rock" })
+        let moved = try XCTUnwrap(library.tracks(in: LibrarySource.macID, folderID: party.id).first)
         let beforeCopy = library.revision
         library.copy([moved], to: rock)
         try await waitForRevision(library, after: beforeCopy)
         XCTAssertEqual(library.tracks(in: LibrarySource.macID).count, 2)
+
+        // Umbenennen: der Ordner bleibt in der Seitenleiste.
+        let partyFolder = try XCTUnwrap(library.folder(id: party.id, in: LibrarySource.macID))
+        let newID = try XCTUnwrap(library.rename(partyFolder, to: "Feier"))
+        XCTAssertTrue(library.isMacFolder(URL(fileURLWithPath: newID)))
+        XCTAssertFalse(library.isMacFolder(party.url))
+
+        // Aus der Seitenleiste nehmen: die Dateien bleiben.
+        library.removeMacFolder(URL(fileURLWithPath: newID))
+        XCTAssertEqual(library.macFolders.map(\.path), [rockURL.standardizedFileURL.path])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: URL(fileURLWithPath: newID).appendingPathComponent("Toto - Africa (Official HD Video).mp3").path))
+    }
+
+    /// Der eine Musikordner aus Velvet 1.2 wird zu Ordnern in der Seitenleiste.
+    func testOldMusicFolderBecomesFolders() async throws {
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Leer"), withIntermediateDirectories: true)
+        let defaults = UserDefaults(suiteName: "velvet-library-tests-\(UUID().uuidString)")!
+        defaults.set(root.path, forKey: "macLibraryPath")
+        let library = LibraryViewModel(history: HistoryStore(fileURL: historyFile), defaults: defaults)
+        XCTAssertEqual(Set(library.macFolders.map(\.lastPathComponent)), [root.lastPathComponent, "Rock"])
+        XCTAssertEqual(defaults.stringArray(forKey: "macFolders")?.count, 2)
     }
 
     private func waitForRevision(_ library: LibraryViewModel, after revision: Int) async throws {

@@ -5,8 +5,8 @@ import Foundation
 struct DuplicateChecker {
     let library: LibraryViewModel
     let history: HistoryStore
-    /// Die Bibliothek, in die gerade geladen wird.
-    let sourceID: String
+    /// Die Bibliothek, in die gerade geladen wird (`nil`: noch kein Ziel gewählt).
+    let sourceID: String?
 
     private struct HistoryCandidate {
         let entry: HistoryEntry

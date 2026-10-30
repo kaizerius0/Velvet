@@ -23,37 +23,37 @@ struct VolumeInfo: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Eine Bibliothek in der Seitenleiste: der Musikordner auf dem Mac oder ein eingesteckter Stick.
-/// Unterordner sind Playlists, die Audio- und Videodateien darin die Titel.
+/// Eine Bibliothek in der Seitenleiste: deine Ordner auf dem Mac oder ein eingesteckter Stick.
 struct LibrarySource: Identifiable, Hashable, Sendable {
     static let macID = "mac"
 
     let id: String
     let name: String
-    let rootURL: URL
+    /// Stick: das Laufwerk selbst (seine Unterordner sind die Ordner).
+    /// Mac: die Ordner, die du in die Seitenleiste geholt hast.
+    let roots: [URL]
     /// Nur bei Sticks und externen Laufwerken.
     let volume: VolumeInfo?
 
     var isExternal: Bool { volume != nil }
 }
 
-/// Ein Ordner in der Bibliothek.
-struct Playlist: Identifiable, Hashable, Sendable {
+/// Ein Ordner in der Bibliothek – das, was anderswo eine Playlist ist.
+struct LibraryFolder: Identifiable, Hashable, Sendable {
     let url: URL
     let name: String
     let trackCount: Int
-    /// Dateien direkt im Hauptordner des Sticks.
-    let isRoot: Bool
+    /// Der Stick selbst – heißt wie der Stick und lässt sich nicht umbenennen oder löschen.
+    let isVolumeRoot: Bool
 
     var id: String { url.standardizedFileURL.path }
-    var displayName: String { isRoot ? "Hauptordner" : name }
 }
 
 /// Eine Audio- oder Videodatei in der Bibliothek.
 struct Track: Identifiable, Hashable, Sendable {
     let url: URL
-    /// Name des Ordners ("" = Hauptordner).
-    let playlistName: String
+    /// Name des Ordners – direkt auf dem Stick der Name des Sticks.
+    let folderName: String
     let size: Int64
     let added: Date
     let isAudio: Bool
@@ -61,7 +61,6 @@ struct Track: Identifiable, Hashable, Sendable {
     var id: String { url.standardizedFileURL.path }
     var title: String { url.deletingPathExtension().lastPathComponent }
     var format: String { url.pathExtension.uppercased() }
-    var playlistDisplayName: String { playlistName.isEmpty ? "Hauptordner" : playlistName }
     var folderID: String { url.deletingLastPathComponent().standardizedFileURL.path }
 }
 

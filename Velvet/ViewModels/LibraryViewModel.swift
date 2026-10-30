@@ -1,8 +1,8 @@
 import AppKit
 import Foundation
 
-/// Alle Bibliotheken: der Musikordner auf dem Mac und jeder eingesteckte Stick.
-/// Unterordner sind Playlists; Sticks erscheinen und verschwinden automatisch.
+/// Alle Bibliotheken: deine Ordner auf dem Mac und jeder eingesteckte Stick.
+/// Sticks erscheinen und verschwinden automatisch, Ordner auf dem Mac holst du selbst in die Seitenleiste.
 @MainActor
 final class LibraryViewModel: ObservableObject {
     struct IndexedTrack {
@@ -23,41 +23,52 @@ final class LibraryViewModel: ObservableObject {
 
     /// Alle Titel mit vorberechneten Suchwörtern – für die Duplikat-Erkennung.
     private(set) var trackIndex: [IndexedTrack] = []
-    private(set) var macFolder: URL
+    /// Die Ordner auf dem Mac in der Seitenleiste.
+    @Published private(set) var macFolders: [URL]
 
     private let history: HistoryStore
     private let defaults: UserDefaults
-    private static let macFolderKey = "macLibraryPath"
+    private static let macFoldersKey = "macFolders"
     private var observers: [NSObjectProtocol] = []
     private var scanTasks: [String: Task<Void, Never>] = [:]
     private var noticeTask: Task<Void, Never>?
 
-    init(history: HistoryStore, defaults: UserDefaults = .standard, macFolder: URL? = nil) {
+    init(history: HistoryStore, defaults: UserDefaults = .standard, macFolders: [URL]? = nil) {
         self.history = history
         self.defaults = defaults
-        self.macFolder = macFolder ?? Self.storedMacFolder(in: defaults) ?? Self.defaultMacFolder
-        try? FileManager.default.createDirectory(at: self.macFolder, withIntermediateDirectories: true)
+        self.macFolders = (macFolders ?? Self.storedMacFolders(in: defaults)).map(\.standardizedFileURL)
+        if macFolders == nil { saveMacFolders() }
         observeVolumes()
         refreshSources(announceNewSticks: false)
     }
 
-    static var defaultMacFolder: URL {
-        let music = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Music")
-        return music.appendingPathComponent("Velvet", isDirectory: true)
+    private static func storedMacFolders(in defaults: UserDefaults) -> [URL] {
+        if let paths = defaults.stringArray(forKey: macFoldersKey) {
+            return paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        }
+        // Bis Velvet 1.2 gab es genau einen Musikordner auf dem Mac: Er kommt mit seinen
+        // Unterordnern (sofern darin Musik liegt) als eigene Ordner in die Seitenleiste.
+        guard let old = oldMacFolder(in: defaults),
+              FileManager.default.fileExists(atPath: old.path) else { return [] }
+        return [old] + LibraryFiles.subfolders(of: old).filter(LibraryFiles.containsMedia)
     }
 
-    private static func storedMacFolder(in defaults: UserDefaults) -> URL? {
-        if let path = defaults.string(forKey: macFolderKey) {
+    private static func oldMacFolder(in defaults: UserDefaults) -> URL? {
+        if let path = defaults.string(forKey: "macLibraryPath") {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
-        // Velvet 1.1 merkte sich genau einen Ort – war es ein Ordner auf dem Mac, wird er übernommen.
         struct OldLocation: Decodable { let path: String; let isExternal: Bool }
         if let data = defaults.data(forKey: "libraryLocation"),
            let old = try? JSONDecoder().decode(OldLocation.self, from: data), !old.isExternal {
             return URL(fileURLWithPath: old.path, isDirectory: true)
         }
-        return nil
+        let music = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Music")
+        return music.appendingPathComponent("Velvet", isDirectory: true)
+    }
+
+    private func saveMacFolders() {
+        defaults.set(macFolders.map(\.path), forKey: Self.macFoldersKey)
     }
 
     // MARK: Quellen
@@ -71,19 +82,25 @@ final class LibraryViewModel: ObservableObject {
     /// Die Bibliothek, in der eine Datei oder ein Ordner liegt.
     func source(containing url: URL) -> LibrarySource? {
         let path = url.standardizedFileURL.path
-        return sources
-            .filter { path == $0.rootURL.standardizedFileURL.path || path.hasPrefix($0.rootURL.standardizedFileURL.path + "/") }
-            .max { $0.rootURL.path.count < $1.rootURL.path.count }
+        var best: (source: LibrarySource, length: Int)?
+        for source in sources {
+            for root in source.roots {
+                let rootPath = root.standardizedFileURL.path
+                guard path == rootPath || path.hasPrefix(rootPath == "/" ? "/" : rootPath + "/") else { continue }
+                if rootPath.count > best?.length ?? -1 { best = (source, rootPath.count) }
+            }
+        }
+        return best?.source
     }
 
     func refreshSources(announceNewSticks: Bool = true) {
-        let mac = LibrarySource(id: LibrarySource.macID, name: "Mac", rootURL: macFolder, volume: nil)
+        let mac = LibrarySource(id: LibrarySource.macID, name: "Dieser Mac", roots: macFolders, volume: nil)
         let sticks = VolumeService.externalVolumes().map {
-            LibrarySource(id: $0.id, name: $0.name, rootURL: $0.url, volume: $0)
+            LibrarySource(id: $0.id, name: $0.name, roots: [$0.url], volume: $0)
         }
         let updated = [mac] + sticks
         let changed = updated.filter { new in
-            !sources.contains { $0.id == new.id && $0.rootURL == new.rootURL }
+            !sources.contains { $0.id == new.id && $0.roots == new.roots }
         }
         let removedIDs = Set(sources.map(\.id)).subtracting(updated.map(\.id))
 
@@ -103,18 +120,73 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func chooseMacFolder() {
+    // MARK: Ordner auf dem Mac
+
+    func isMacFolder(_ url: URL) -> Bool {
+        macFolders.contains { Self.samePath($0, url) }
+    }
+
+    private static func samePath(_ a: URL, _ b: URL) -> Bool {
+        a.standardizedFileURL.path == b.standardizedFileURL.path
+    }
+
+    /// Holt einen Ordner in die Seitenleiste. Ordner auf Sticks stehen dort ohnehin.
+    func addMacFolder(_ url: URL) {
+        guard !isMacFolder(url), !isOnStick(url) else { return }
+        macFolders.append(url.standardizedFileURL)
+        saveMacFolders()
+        refreshSources(announceNewSticks: false)
+    }
+
+    /// Nimmt einen Ordner aus der Seitenleiste – die Dateien bleiben, wo sie sind.
+    func removeMacFolder(_ url: URL) {
+        macFolders.removeAll { Self.samePath($0, url) }
+        saveMacFolders()
+        refreshSources(announceNewSticks: false)
+    }
+
+    private func replaceMacFolder(_ old: URL, with new: URL) {
+        guard let index = macFolders.firstIndex(where: { Self.samePath($0, old) }) else { return }
+        macFolders[index] = new.standardizedFileURL
+        saveMacFolders()
+        refreshSources(announceNewSticks: false)
+    }
+
+    func isOnStick(_ url: URL) -> Bool {
+        source(containing: url)?.isExternal ?? (VolumeService.volume(containing: url)?.isExternal ?? false)
+    }
+
+    /// Ein vorhandener Ordner – auf dem Mac oder einem Stick. Ordner auf dem Mac kommen in die Seitenleiste.
+    func chooseFolder(title: String = "Ordner wählen", prompt: String = "Auswählen", startingAt start: URL? = nil) -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Musikordner wählen"
-        panel.prompt = "Auswählen"
+        panel.title = title
+        panel.prompt = prompt
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
-        panel.directoryURL = macFolder
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        macFolder = url
-        defaults.set(url.path, forKey: Self.macFolderKey)
-        refreshSources(announceNewSticks: false)
+        panel.directoryURL = start ?? macFolders.last?.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        addMacFolder(url)
+        return url
+    }
+
+    /// „Neuer Ordner …“ auf dem Mac: Ort und Namen wählen.
+    func createMacFolder() -> URL? {
+        let panel = NSSavePanel()
+        panel.title = "Neuer Ordner"
+        panel.prompt = "Erstellen"
+        panel.nameFieldLabel = "Name:"
+        panel.nameFieldStringValue = "Neuer Ordner"
+        panel.canCreateDirectories = true
+        panel.directoryURL = macFolders.last?.deletingLastPathComponent()
+            ?? FileManager.default.urls(for: .musicDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        // Gibt es den Ordner schon, kommt er einfach in die Seitenleiste.
+        if FileManager.default.fileExists(atPath: url.path) {
+            addMacFolder(url)
+            return url
+        }
+        return createFolder(named: url.lastPathComponent, in: url.deletingLastPathComponent())?.url
     }
 
     private func observeVolumes() {
@@ -128,19 +200,19 @@ final class LibraryViewModel: ObservableObject {
 
     // MARK: Inhalte
 
-    func playlists(in sourceID: String) -> [Playlist] {
-        snapshots[sourceID]?.playlists ?? []
+    func folders(in sourceID: String) -> [LibraryFolder] {
+        snapshots[sourceID]?.folders ?? []
     }
 
-    func playlist(id: String, in sourceID: String) -> Playlist? {
-        playlists(in: sourceID).first { $0.id == id }
+    func folder(id: String, in sourceID: String) -> LibraryFolder? {
+        folders(in: sourceID).first { $0.id == id }
     }
 
-    /// Titel einer Playlist – oder alle Titel der Bibliothek (`playlistID == nil`).
-    func tracks(in sourceID: String, playlistID: String? = nil) -> [Track] {
+    /// Titel eines Ordners – oder alle Titel der Bibliothek (`folderID == nil`).
+    func tracks(in sourceID: String, folderID: String? = nil) -> [Track] {
         let all = snapshots[sourceID]?.tracks ?? []
-        guard let playlistID else { return all }
-        return all.filter { $0.folderID == playlistID }
+        guard let folderID else { return all }
+        return all.filter { $0.folderID == folderID }
     }
 
     func isScanning(_ sourceID: String) -> Bool {
@@ -149,12 +221,16 @@ final class LibraryViewModel: ObservableObject {
 
     func rescan(_ sourceID: String) {
         guard let source = source(id: sourceID) else { return }
-        let root = source.rootURL
+        let roots = source.roots
+        let volumeName = source.volume?.name
         scanTasks[sourceID]?.cancel()
         scanning.insert(sourceID)
         scanTasks[sourceID] = Task { [weak self] in
-            let snapshot = await Task.detached(priority: .userInitiated) { LibraryFiles.scan(root: root) }.value
-            guard let self, !Task.isCancelled, self.source(id: sourceID)?.rootURL == root else { return }
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                if let volumeName, let root = roots.first { return LibraryFiles.scanVolume(root: root, name: volumeName) }
+                return LibraryFiles.scan(folders: roots)
+            }.value
+            guard let self, !Task.isCancelled, self.source(id: sourceID)?.roots == roots else { return }
             self.snapshots[sourceID] = snapshot
             self.scanning.remove(sourceID)
             self.updateFreeSpace(of: sourceID)
@@ -185,16 +261,16 @@ final class LibraryViewModel: ObservableObject {
               let volume = sources[index].volume,
               let fresh = VolumeService.info(forVolume: volume.url) else { return }
         let source = sources[index]
-        sources[index] = LibrarySource(id: source.id, name: source.name, rootURL: source.rootURL, volume: fresh)
+        sources[index] = LibrarySource(id: source.id, name: source.name, roots: source.roots, volume: fresh)
     }
 
     // MARK: Orte
 
-    /// „AUTO-STICK › Rock“ bzw. „Mac › Rock“
+    /// „AUTO-STICK › Rock“, direkt auf dem Stick „AUTO-STICK“, auf dem Mac nur der Ordnername.
     func locationText(for file: URL) -> String {
         let folder = file.deletingLastPathComponent().standardizedFileURL
-        guard let source = source(containing: file) else { return folder.lastPathComponent }
-        if folder == source.rootURL.standardizedFileURL { return source.name }
+        guard let source = source(containing: file), let volume = source.volume else { return folder.lastPathComponent }
+        if folder == volume.url.standardizedFileURL { return source.name }
         return "\(source.name) › \(folder.lastPathComponent)"
     }
 
@@ -205,54 +281,51 @@ final class LibraryViewModel: ObservableObject {
 
     /// Auf Sticks wird endgültig gelöscht, auf dem Mac in den Papierkorb gelegt.
     func deletesPermanently(at url: URL) -> Bool {
-        source(containing: url)?.isExternal ?? (VolumeService.volume(containing: url)?.isExternal ?? false)
+        isOnStick(url)
     }
 
-    /// Ordner einer Playlist (wird bei Bedarf angelegt). Ohne Namen: Hauptordner der Bibliothek.
-    func folder(forPlaylist name: String?, in sourceID: String) -> URL? {
-        guard let root = source(id: sourceID)?.rootURL else { return nil }
-        guard let name, !name.isEmpty else { return root }
-        let url = root.appendingPathComponent(LibraryFiles.sanitizedName(name), isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
+    // MARK: Ordner
 
-    // MARK: Playlists
-
+    /// Legt einen Ordner an – auf dem Stick oder dem Mac. Auf dem Mac kommt er in die Seitenleiste.
     @discardableResult
-    func createPlaylist(named name: String, in sourceID: String) -> Playlist? {
-        guard let root = source(id: sourceID)?.rootURL else { return nil }
+    func createFolder(named name: String, in parent: URL) -> LibraryFolder? {
         do {
-            let url = try LibraryFiles.createFolder(named: name, in: root)
-            rescan(sourceID)
-            return Playlist(url: url, name: url.lastPathComponent, trackCount: 0, isRoot: false)
+            let url = try LibraryFiles.createFolder(named: name, in: parent)
+            if isOnStick(url) {
+                refreshIfAffected(by: url)
+            } else {
+                addMacFolder(url)
+            }
+            return LibraryFolder(url: url, name: url.lastPathComponent, trackCount: 0, isVolumeRoot: false)
         } catch {
             errorMessage = error.localizedDescription
             return nil
         }
     }
 
-    /// Gibt die neue Playlist-ID zurück, damit die Auswahl folgen kann.
+    /// Gibt die neue Ordner-ID zurück, damit die Auswahl folgen kann.
     @discardableResult
-    func rename(_ playlist: Playlist, to name: String) -> String? {
-        guard !playlist.isRoot else { return nil }
+    func rename(_ folder: LibraryFolder, to name: String) -> String? {
+        guard !folder.isVolumeRoot else { return nil }
         var newID: String?
-        perform(at: playlist.url) {
-            let renamed = try LibraryFiles.rename(playlist.url, to: name)
-            history.updatePaths(from: playlist.url, to: renamed)
+        perform(at: folder.url) {
+            let renamed = try LibraryFiles.rename(folder.url, to: name)
+            history.updatePaths(from: folder.url, to: renamed)
+            replaceMacFolder(folder.url, with: renamed)
             newID = renamed.standardizedFileURL.path
         }
         return newID
     }
 
-    func delete(_ playlist: Playlist) {
-        guard !playlist.isRoot else { return }
-        let files = trackIndex.map(\.track).filter { $0.folderID == playlist.id }
-        let permanently = deletesPermanently(at: playlist.url)
-        perform(at: playlist.url) {
-            try LibraryFiles.remove(playlist.url, permanently: permanently)
+    func delete(_ folder: LibraryFolder) {
+        guard !folder.isVolumeRoot else { return }
+        let files = trackIndex.map(\.track).filter { $0.folderID == folder.id }
+        let permanently = deletesPermanently(at: folder.url)
+        perform(at: folder.url) {
+            try LibraryFiles.remove(folder.url, permanently: permanently)
             files.forEach { history.markRemoved($0.url, state: .deleted) }
-            showNotice("„\(playlist.name)“ gelöscht")
+            removeMacFolder(folder.url)
+            showNotice("„\(folder.name)“ gelöscht")
         }
     }
 
@@ -265,24 +338,24 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func move(_ selection: [Track], to playlist: Playlist) {
-        perform(at: playlist.url) {
-            for track in selection where track.folderID != playlist.id {
-                let moved = try LibraryFiles.move(track.url, into: playlist.url)
+    func move(_ selection: [Track], to folder: LibraryFolder) {
+        perform(at: folder.url) {
+            for track in selection where track.folderID != folder.id {
+                let moved = try LibraryFiles.move(track.url, into: folder.url)
                 history.updatePaths(from: track.url, to: moved)
             }
-            showNotice("\(Formatters.count(selection.count, "Titel", "Titel")) nach „\(playlist.displayName)“ verschoben")
+            showNotice("\(Formatters.count(selection.count, "Titel", "Titel")) nach „\(folder.name)“ verschoben")
         }
     }
 
-    /// Kopiert Titel in eine Playlist einer anderen Bibliothek, z. B. vom Mac auf den Stick.
-    func copy(_ selection: [Track], to playlist: Playlist) {
-        perform(at: playlist.url) {
+    /// Kopiert Titel in einen Ordner einer anderen Bibliothek, z. B. vom Mac auf den Stick.
+    func copy(_ selection: [Track], to folder: LibraryFolder) {
+        perform(at: folder.url) {
             for track in selection {
-                let target = LibraryFiles.uniqueURL(playlist.url.appendingPathComponent(track.url.lastPathComponent))
+                let target = LibraryFiles.uniqueURL(folder.url.appendingPathComponent(track.url.lastPathComponent))
                 try FileManager.default.copyItem(at: track.url, to: target)
             }
-            showNotice("\(Formatters.count(selection.count, "Titel", "Titel")) nach „\(locationText(forFolder: playlist.url))“ kopiert")
+            showNotice("\(Formatters.count(selection.count, "Titel", "Titel")) nach „\(locationText(forFolder: folder.url))“ kopiert")
         }
     }
 
@@ -304,16 +377,11 @@ final class LibraryViewModel: ObservableObject {
         NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
-    func open(_ sourceID: String) {
-        guard let url = source(id: sourceID)?.rootURL else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     // MARK: Stick
 
     /// Entfernt „._“-Dateien und „.DS_Store“, die Autoradios als kaputte Titel anzeigen.
     func cleanForCar(_ sourceID: String) async {
-        guard let root = source(id: sourceID)?.rootURL else { return }
+        guard let root = source(id: sourceID)?.volume?.url else { return }
         let report = await Task.detached(priority: .userInitiated) { LibraryFiles.cleanForCar(root: root) }.value
         showNotice(report.removedFiles == 0
             ? "Keine Mac-Begleitdateien gefunden"

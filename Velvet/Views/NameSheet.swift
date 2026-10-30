@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Kleines Fenster für einen Namen (Playlist anlegen, umbenennen).
+/// Kleines Fenster für einen Namen (Ordner anlegen, umbenennen).
 struct NameSheet: View {
     let title: String
     let initial: String

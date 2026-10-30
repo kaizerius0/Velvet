@@ -1,12 +1,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Eine Playlist (oder alle Titel einer Bibliothek) – die Titel verwalten.
+/// Ein Ordner (oder alle Titel eines Sticks) – die Titel verwalten.
 /// Neue Titel kommen über „Titel hinzufügen“ in den Bereich „Hinzufügen“.
-struct PlaylistScreen: View {
+struct FolderScreen: View {
     let sourceID: String
-    /// `nil` = alle Titel der Bibliothek.
-    let playlistID: String?
+    /// `nil` = alle Titel des Sticks.
+    let folderID: String?
 
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
@@ -72,18 +72,30 @@ struct PlaylistScreen: View {
 
     private var source: LibrarySource? { library.source(id: sourceID) }
 
-    private var playlist: Playlist? {
-        playlistID.flatMap { library.playlist(id: $0, in: sourceID) }
+    private var folder: LibraryFolder? {
+        folderID.flatMap { library.folder(id: $0, in: sourceID) }
+    }
+
+    /// Der Ordner selbst – auch solange er noch eingelesen wird.
+    private var folderURL: URL? {
+        folder?.url ?? folderID.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? source?.volume?.url
     }
 
     private var title: String {
-        playlist?.displayName ?? "Alle Titel"
+        if let folderID { return folder?.name ?? URL(fileURLWithPath: folderID).lastPathComponent }
+        return "Alle Titel"
+    }
+
+    /// Auf dem Mac der Ort des Ordners („~/Downloads“), auf dem Stick der Stick.
+    private var place: String {
+        guard source?.isExternal == false, let parent = folderURL?.deletingLastPathComponent() else { return source?.name ?? "" }
+        return (parent.path as NSString).abbreviatingWithTildeInPath
     }
 
     private var subtitle: String {
-        let tracks = library.tracks(in: sourceID, playlistID: playlistID)
+        let tracks = library.tracks(in: sourceID, folderID: folderID)
         let size = tracks.reduce(Int64(0)) { $0 + $1.size }
-        var parts = [source?.name ?? "", Formatters.count(tracks.count, "Titel", "Titel")]
+        var parts = [place, Formatters.count(tracks.count, "Titel", "Titel")]
         if size > 0 { parts.append(Formatters.bytes(size)) }
         if let free = source?.volume?.availableBytes { parts.append("\(Formatters.bytes(free)) frei") }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -106,7 +118,7 @@ struct PlaylistScreen: View {
                     .foregroundStyle(.green)
                     .lineLimit(1)
             }
-            if library.tracks(in: sourceID, playlistID: playlistID).count > 12 {
+            if library.tracks(in: sourceID, folderID: folderID).count > 12 {
                 TextField("Filtern", text: $filter)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 180)
@@ -124,18 +136,17 @@ struct PlaylistScreen: View {
 
     private var moreMenu: some View {
         Menu {
-            if let playlist {
-                Button("Im Finder zeigen") { library.reveal([playlist.url]) }
-            } else {
-                Button("Im Finder zeigen") { library.open(sourceID) }
+            if let folderURL {
+                Button("Im Finder zeigen") { library.reveal([folderURL]) }
             }
-            if source?.isExternal == true {
+            if let volume = source?.volume {
                 Button("Für das Auto aufräumen") { Task { await library.cleanForCar(sourceID) } }
                     .help("Entfernt Mac-Begleitdateien (._*), die Autoradios als kaputte Titel zeigen")
                 Button("Auswerfen") { Task { await library.eject(sourceID) } }
-                    .disabled(source.map { queue.isWriting(to: $0.rootURL) } ?? true)
-            } else {
-                Button("Musikordner wählen …") { library.chooseMacFolder() }
+                    .disabled(queue.isWriting(to: volume.url))
+            } else if let folderURL, library.isMacFolder(folderURL) {
+                Divider()
+                Button("Aus der Seitenleiste entfernen") { library.removeMacFolder(folderURL) }
             }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -147,10 +158,9 @@ struct PlaylistScreen: View {
 
     // MARK: Hinzufügen
 
-    /// Öffnet „Hinzufügen“ mit dieser Playlist als Ziel.
+    /// Öffnet „Hinzufügen“ mit diesem Ordner als Ziel.
     private func openAdd() {
-        settings.addTargetSource = sourceID
-        settings.addTargetPlaylist = playlist.map { $0.isRoot ? "" : $0.name } ?? ""
+        if let folderURL { settings.addTarget = folderURL }
         navigation.selection = .add
         navigation.focusInput = UUID()
     }
@@ -173,9 +183,9 @@ struct PlaylistScreen: View {
     /// Titel, die gerade hierher geladen werden (ohne fertige).
     private var incoming: [DownloadItem] {
         let items: [DownloadItem]
-        if let playlist {
-            items = queue.items(for: playlist.url)
-        } else if let root = source?.rootURL {
+        if let folderID {
+            items = queue.items(for: URL(fileURLWithPath: folderID, isDirectory: true))
+        } else if let root = source?.volume?.url {
             items = queue.items(within: root)
         } else {
             items = []
@@ -226,7 +236,7 @@ struct PlaylistScreen: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: "music.note.list")
+            Image(systemName: "folder")
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
             Text(filter.isEmpty ? "Noch keine Titel" : "Keine Treffer für „\(filter)“")
@@ -245,7 +255,7 @@ struct PlaylistScreen: View {
                     Text(track.title)
                 }
             }
-            TableColumn("Playlist", value: \.playlistDisplayName)
+            TableColumn("Ordner", value: \.folderName)
                 .width(min: 80, ideal: 140, max: 240)
             TableColumn("Format", value: \.format)
                 .width(min: 46, ideal: 56, max: 70)
@@ -266,10 +276,10 @@ struct PlaylistScreen: View {
     }
 
     private var visibleTracks: [Track] {
-        let base = library.tracks(in: sourceID, playlistID: playlistID)
+        let base = library.tracks(in: sourceID, folderID: folderID)
         let words = filter.lowercased().split(separator: " ")
         let filtered = words.isEmpty ? base : base.filter { track in
-            let haystack = "\(track.title) \(track.playlistName)".lowercased()
+            let haystack = "\(track.title) \(track.folderName)".lowercased()
             return words.allSatisfy { haystack.contains($0) }
         }
         return filtered.sorted(using: sortOrder)
@@ -297,8 +307,8 @@ struct PlaylistScreen: View {
 
     private func moveMenu(for selected: [Track]) -> some View {
         Menu("Verschieben nach") {
-            ForEach(library.playlists(in: sourceID)) { target in
-                Button(target.displayName) { library.move(selected, to: target) }
+            ForEach(library.folders(in: sourceID)) { target in
+                Button(target.name) { library.move(selected, to: target) }
                     .disabled(selected.allSatisfy { $0.folderID == target.id })
             }
         }
@@ -312,8 +322,8 @@ struct PlaylistScreen: View {
             Menu("Kopieren nach") {
                 ForEach(others) { other in
                     Section(other.name) {
-                        ForEach(library.playlists(in: other.id)) { target in
-                            Button(target.displayName) { library.copy(selected, to: target) }
+                        ForEach(library.folders(in: other.id)) { target in
+                            Button(target.name) { library.copy(selected, to: target) }
                         }
                     }
                 }

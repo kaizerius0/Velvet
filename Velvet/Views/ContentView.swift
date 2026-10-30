@@ -13,13 +13,22 @@ struct ContentView: View {
         }
         .frame(minWidth: 980, minHeight: 640)
         .sheet(item: Binding(
-            get: { navigation.newPlaylistSource.map(SheetID.init) },
-            set: { navigation.newPlaylistSource = $0?.id }
+            get: { stickForNewFolder.map(SheetID.init) },
+            set: { navigation.newFolderSource = $0?.id }
         )) { sheet in
-            NameSheet(title: "Neue Playlist", initial: "", confirm: "Erstellen") { name in
-                if let playlist = library.createPlaylist(named: name, in: sheet.id) {
-                    navigation.selection = .playlist(source: sheet.id, id: playlist.id)
+            NameSheet(title: "Neuer Ordner", initial: "", confirm: "Erstellen") { name in
+                if let root = library.source(id: sheet.id)?.volume?.url,
+                   let folder = library.createFolder(named: name, in: root) {
+                    navigation.selection = .folder(source: sheet.id, id: folder.id)
                 }
+            }
+        }
+        .onChange(of: navigation.newFolderSource) { source in
+            // Auf dem Mac gibt es keinen festen Ort – dort fragt ein Fenster nach Ort und Namen.
+            guard source == LibrarySource.macID else { return }
+            navigation.newFolderSource = nil
+            if let url = library.createMacFolder() {
+                navigation.selection = .folder(source: LibrarySource.macID, id: url.standardizedFileURL.path)
             }
         }
         .onChange(of: library.newlyMountedSourceID) { id in
@@ -27,9 +36,16 @@ struct ContentView: View {
             if let id, navigation.selection != .add { navigation.selection = .allTracks(source: id) }
         }
         .onChange(of: library.sources) { sources in
-            // Ausgeworfener Stick: zurück zum Mac.
+            // Ausgeworfener Stick: zurück zu „Hinzufügen“.
             if let source = navigation.sourceID, !sources.contains(where: { $0.id == source }) {
-                navigation.selection = .allTracks(source: LibrarySource.macID)
+                navigation.selection = .add
+            }
+        }
+        .onChange(of: library.macFolders) { _ in
+            // Ordner aus der Seitenleiste genommen.
+            if navigation.sourceID == LibrarySource.macID, let id = navigation.folderID,
+               !library.isMacFolder(URL(fileURLWithPath: id)) {
+                navigation.selection = .add
             }
         }
         .alert("Hinweis", isPresented: Binding(
@@ -42,6 +58,10 @@ struct ContentView: View {
         }
     }
 
+    private var stickForNewFolder: String? {
+        navigation.newFolderSource == LibrarySource.macID ? nil : navigation.newFolderSource
+    }
+
     @ViewBuilder
     private var detail: some View {
         switch navigation.selection {
@@ -51,11 +71,11 @@ struct ContentView: View {
         case .history:
             HistoryScreen()
                 .navigationTitle("Verlauf")
-        case let .playlist(source, id):
-            PlaylistScreen(sourceID: source, playlistID: id)
+        case let .folder(source, id):
+            FolderScreen(sourceID: source, folderID: id)
                 .id(navigation.selection)
         case let .allTracks(source):
-            PlaylistScreen(sourceID: source, playlistID: nil)
+            FolderScreen(sourceID: source, folderID: nil)
                 .id(navigation.selection)
         }
     }
@@ -65,14 +85,14 @@ struct ContentView: View {
     }
 }
 
-/// Seitenleiste: jede Bibliothek (Mac, Sticks) mit ihren Playlists, dazu der Verlauf.
+/// Seitenleiste: deine Ordner auf dem Mac, jeder Stick mit seinen Ordnern, dazu der Verlauf.
 struct Sidebar: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
 
-    @State private var renameTarget: Playlist?
-    @State private var deleteTarget: Playlist?
+    @State private var renameTarget: LibraryFolder?
+    @State private var deleteTarget: LibraryFolder?
 
     var body: some View {
         List(selection: $navigation.selection) {
@@ -92,17 +112,28 @@ struct Sidebar: View {
             }
             ForEach(library.sources) { source in
                 Section {
-                    Label("Alle Titel", systemImage: "music.note")
-                        .badge(library.tracks(in: source.id).count)
-                        .tag(AppNavigation.Item.allTracks(source: source.id))
-                    ForEach(visiblePlaylists(in: source)) { playlist in
-                        Label(playlist.displayName, systemImage: playlist.isRoot ? "folder" : "music.note.list")
-                            .badge(playlist.trackCount)
-                            .tag(AppNavigation.Item.playlist(source: source.id, id: playlist.id))
-                            .contextMenu { playlistMenu(playlist) }
+                    if source.isExternal {
+                        Label("Alle Titel", systemImage: "music.note")
+                            .badge(library.tracks(in: source.id).count)
+                            .tag(AppNavigation.Item.allTracks(source: source.id))
+                    } else if library.macFolders.isEmpty {
+                        Button {
+                            selectFolder(library.chooseFolder(title: "Ordner hinzufügen", prompt: "Hinzufügen"))
+                        } label: {
+                            Label("Ordner hinzufügen …", systemImage: "folder.badge.plus")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                    ForEach(visibleFolders(in: source)) { folder in
+                        Label(folder.name, systemImage: folder.isVolumeRoot ? "externaldrive" : "folder")
+                            .badge(folder.trackCount)
+                            .tag(AppNavigation.Item.folder(source: source.id, id: folder.id))
+                            .contextMenu { folderMenu(folder, in: source) }
                     }
                 } header: {
-                    SourceHeader(source: source)
+                    SourceHeader(source: source, onNewMacFolder: { selectFolder(library.createMacFolder()) },
+                                 onAddMacFolder: { selectFolder(library.chooseFolder(title: "Ordner hinzufügen", prompt: "Hinzufügen")) })
                 }
             }
             Section {
@@ -123,11 +154,11 @@ struct Sidebar: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
-        .sheet(item: $renameTarget) { playlist in
-            NameSheet(title: "Playlist umbenennen", initial: playlist.name, confirm: "Umbenennen") { name in
-                let wasSelected = navigation.playlistID == playlist.id
-                if let newID = library.rename(playlist, to: name), wasSelected, let source = library.source(containing: playlist.url) {
-                    navigation.selection = .playlist(source: source.id, id: newID)
+        .sheet(item: $renameTarget) { folder in
+            NameSheet(title: "Ordner umbenennen", initial: folder.name, confirm: "Umbenennen") { name in
+                let wasSelected = navigation.folderID == folder.id
+                if let newID = library.rename(folder, to: name), wasSelected, let source = library.source(containing: URL(fileURLWithPath: newID)) {
+                    navigation.selection = .folder(source: source.id, id: newID)
                 }
             }
         }
@@ -136,40 +167,52 @@ struct Sidebar: View {
             set: { if !$0 { deleteTarget = nil } }
         )) {
             Button("Löschen", role: .destructive) {
-                if let playlist = deleteTarget { library.delete(playlist) }
+                if let folder = deleteTarget { library.delete(folder) }
                 deleteTarget = nil
             }
         } message: {
-            if let playlist = deleteTarget {
-                Text(library.deletesPermanently(at: playlist.url)
-                     ? "Der Ordner und \(Formatters.count(playlist.trackCount, "Titel", "Titel")) werden endgültig vom Stick gelöscht."
-                     : "Der Ordner und \(Formatters.count(playlist.trackCount, "Titel", "Titel")) kommen in den Papierkorb.")
+            if let folder = deleteTarget {
+                Text(library.deletesPermanently(at: folder.url)
+                     ? "Der Ordner und \(Formatters.count(folder.trackCount, "Titel", "Titel")) werden endgültig vom Stick gelöscht."
+                     : "Der Ordner und \(Formatters.count(folder.trackCount, "Titel", "Titel")) kommen in den Papierkorb.")
             }
         }
     }
 
-    /// Der Hauptordner erscheint nur, wenn dort auch Titel liegen.
-    private func visiblePlaylists(in source: LibrarySource) -> [Playlist] {
-        library.playlists(in: source.id).filter { !$0.isRoot || $0.trackCount > 0 }
+    /// Direkt auf dem Stick liegende Titel erscheinen unter dem Namen des Sticks – nur, wenn es welche gibt.
+    private func visibleFolders(in source: LibrarySource) -> [LibraryFolder] {
+        let folders = library.folders(in: source.id)
+        return folders.filter { !$0.isVolumeRoot || $0.trackCount > 0 || folders.count == 1 }
+    }
+
+    /// Springt zu einem gerade gewählten oder angelegten Ordner.
+    private func selectFolder(_ url: URL?) {
+        guard let url, let source = library.source(containing: url) else { return }
+        navigation.selection = .folder(source: source.id, id: url.standardizedFileURL.path)
     }
 
     @ViewBuilder
-    private func playlistMenu(_ playlist: Playlist) -> some View {
-        Button("Im Finder zeigen") { library.reveal([playlist.url]) }
-        if !playlist.isRoot {
-            Button("Umbenennen …") { renameTarget = playlist }
+    private func folderMenu(_ folder: LibraryFolder, in source: LibrarySource) -> some View {
+        Button("Im Finder zeigen") { library.reveal([folder.url]) }
+        if !folder.isVolumeRoot {
+            Button("Umbenennen …") { renameTarget = folder }
             Divider()
-            Button("Löschen …", role: .destructive) { deleteTarget = playlist }
+            if !source.isExternal {
+                Button("Aus der Seitenleiste entfernen") { library.removeMacFolder(folder.url) }
+            }
+            Button(source.isExternal ? "Löschen …" : "In den Papierkorb …", role: .destructive) { deleteTarget = folder }
         }
     }
 }
 
-/// Abschnittskopf einer Bibliothek: Name, „+“ für neue Playlists, Auswerfen bei Sticks.
+/// Abschnittskopf einer Bibliothek: Name, „+“ für neue Ordner, Auswerfen bei Sticks.
 private struct SourceHeader: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
     let source: LibrarySource
+    let onNewMacFolder: () -> Void
+    let onAddMacFolder: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
@@ -178,23 +221,34 @@ private struct SourceHeader: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
-            Button {
-                navigation.newPlaylistSource = source.id
-            } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.borderless)
-            .help("Neue Playlist")
+            if let volume = source.volume {
+                Button {
+                    navigation.newFolderSource = source.id
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.borderless)
+                .help("Neuer Ordner auf „\(source.name)“")
 
-            if source.isExternal {
                 Button {
                     Task { await library.eject(source.id) }
                 } label: {
                     Image(systemName: "eject")
                 }
                 .buttonStyle(.borderless)
-                .disabled(queue.isWriting(to: source.rootURL))
-                .help(queue.isWriting(to: source.rootURL) ? "Es werden noch Titel auf diesen Stick geladen" : "Auswerfen")
+                .disabled(queue.isWriting(to: volume.url))
+                .help(queue.isWriting(to: volume.url) ? "Es werden noch Titel auf diesen Stick geladen" : "Auswerfen")
+            } else {
+                Menu {
+                    Button("Neuer Ordner …", action: onNewMacFolder)
+                    Button("Vorhandenen Ordner hinzufügen …", action: onAddMacFolder)
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Ordner hinzufügen")
             }
         }
     }

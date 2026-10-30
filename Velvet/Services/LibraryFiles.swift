@@ -1,11 +1,12 @@
 import Foundation
 
-/// Dateioperationen der Bibliothek: einlesen, Playlists anlegen, umbenennen, verschieben, löschen, aufräumen.
+/// Dateioperationen der Bibliothek: einlesen, Ordner anlegen, umbenennen, verschieben, löschen, aufräumen.
 enum LibraryFiles {
     static let audioExtensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aiff", "aif", "ogg", "opus", "wma", "alac"]
     static let videoExtensions: Set<String> = ["mp4", "m4v", "mov", "mkv", "webm", "avi"]
-    /// Systemordner von Windows/Android, die keine Playlists sind.
+    /// Systemordner von Windows/Android, die keine Musikordner sind.
     private static let ignoredFolders: Set<String> = ["System Volume Information", "$RECYCLE.BIN", "RECYCLER", "LOST.DIR", "Android"]
+    private static let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey]
 
     static func isMedia(_ url: URL) -> Bool {
         let ext = url.pathExtension.lowercased()
@@ -13,53 +14,71 @@ enum LibraryFiles {
     }
 
     struct Snapshot: Sendable {
-        var playlists: [Playlist] = []
+        var folders: [LibraryFolder] = []
         var tracks: [Track] = []
     }
 
-    /// Liest den Hauptordner und alle direkten Unterordner (= Playlists) ein.
-    static func scan(root: URL) -> Snapshot {
-        let fileManager = FileManager.default
-        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey]
-
-        func contents(of folder: URL) -> [URL] {
-            (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
-        }
-
-        func tracks(in folder: URL, playlist: String) -> [Track] {
-            contents(of: folder).compactMap { url in
-                guard isMedia(url), !url.lastPathComponent.hasPrefix("._"),
-                      let values = try? url.resourceValues(forKeys: Set(keys)), values.isDirectory != true else { return nil }
-                return Track(
-                    url: url,
-                    playlistName: playlist,
-                    size: Int64(values.fileSize ?? 0),
-                    added: values.creationDate ?? values.contentModificationDate ?? .distantPast,
-                    isAudio: audioExtensions.contains(url.pathExtension.lowercased())
-                )
-            }
-        }
-
+    /// Liest einen Stick ein: den Stick selbst und alle direkten Unterordner.
+    static func scanVolume(root: URL, name: String) -> Snapshot {
         var snapshot = Snapshot()
-        let rootTracks = tracks(in: root, playlist: "")
+        let rootTracks = tracks(in: root, folderName: name)
         snapshot.tracks = rootTracks
 
-        var playlists: [Playlist] = []
-        for folder in contents(of: root) {
-            // Ordner sind Playlists – Programme und andere Pakete (z. B. „Velvet.app“) nicht.
-            guard let values = try? folder.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]),
-                  values.isDirectory == true, values.isPackage != true,
-                  !ignoredFolders.contains(folder.lastPathComponent) else { continue }
-            let folderTracks = tracks(in: folder, playlist: folder.lastPathComponent)
+        var folders: [LibraryFolder] = []
+        for folder in subfolders(of: root) {
+            let folderTracks = tracks(in: folder, folderName: folder.lastPathComponent)
             snapshot.tracks += folderTracks
-            playlists.append(Playlist(url: folder, name: folder.lastPathComponent, trackCount: folderTracks.count, isRoot: false))
+            folders.append(LibraryFolder(url: folder, name: folder.lastPathComponent, trackCount: folderTracks.count, isVolumeRoot: false))
         }
-        playlists.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        if !rootTracks.isEmpty || playlists.isEmpty {
-            playlists.insert(Playlist(url: root, name: "", trackCount: rootTracks.count, isRoot: true), at: 0)
-        }
-        snapshot.playlists = playlists
+        folders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        folders.insert(LibraryFolder(url: root, name: name, trackCount: rootTracks.count, isVolumeRoot: true), at: 0)
+        snapshot.folders = folders
         return snapshot
+    }
+
+    /// Liest einzelne Ordner ein (auf dem Mac) – jeweils die Dateien direkt darin.
+    /// Ordner, die es nicht mehr gibt, fehlen einfach.
+    static func scan(folders: [URL]) -> Snapshot {
+        var snapshot = Snapshot()
+        for folder in folders {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+            let folderTracks = tracks(in: folder, folderName: folder.lastPathComponent)
+            snapshot.tracks += folderTracks
+            snapshot.folders.append(LibraryFolder(url: folder, name: folder.lastPathComponent, trackCount: folderTracks.count, isVolumeRoot: false))
+        }
+        snapshot.folders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return snapshot
+    }
+
+    /// Direkte Unterordner – ohne Programme und andere Pakete (z. B. „Velvet.app“) und ohne Systemordner.
+    static func subfolders(of folder: URL) -> [URL] {
+        contents(of: folder).filter { url in
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) else { return false }
+            return values.isDirectory == true && values.isPackage != true && !ignoredFolders.contains(url.lastPathComponent)
+        }
+    }
+
+    static func containsMedia(_ folder: URL) -> Bool {
+        contents(of: folder).contains { isMedia($0) && !$0.lastPathComponent.hasPrefix("._") }
+    }
+
+    private static func contents(of folder: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+    }
+
+    private static func tracks(in folder: URL, folderName: String) -> [Track] {
+        contents(of: folder).compactMap { url in
+            guard isMedia(url), !url.lastPathComponent.hasPrefix("._"),
+                  let values = try? url.resourceValues(forKeys: Set(keys)), values.isDirectory != true else { return nil }
+            return Track(
+                url: url,
+                folderName: folderName,
+                size: Int64(values.fileSize ?? 0),
+                added: values.creationDate ?? values.contentModificationDate ?? .distantPast,
+                isAudio: audioExtensions.contains(url.pathExtension.lowercased())
+            )
+        }
     }
 
     // MARK: - Namen

@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-/// Die Warteschlange aller Titel, die gerade hinzugefügt werden – jeder mit seiner Ziel-Playlist.
+/// Die Warteschlange aller Titel, die gerade hinzugefügt werden – jeder mit seinem Zielordner.
 /// Suchen, Auswahl, parallele Downloads; fertige Titel verschwinden und stehen dann in der Bibliothek.
 @MainActor
 final class QueueViewModel: ObservableObject {

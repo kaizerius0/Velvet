@@ -18,7 +18,7 @@ final class UIFlowSnapshotTests: XCTestCase {
         outputDirectory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-        // Ein kleiner Musikordner mit zwei Playlists.
+        // Zwei Musikordner auf dem Mac.
         root = FileManager.default.temporaryDirectory.appendingPathComponent("Velvet-Musik-\(UUID().uuidString.prefix(6))", isDirectory: true)
         for folder in ["Rock", "Party"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
@@ -47,14 +47,15 @@ final class UIFlowSnapshotTests: XCTestCase {
         let input = InputViewModel()
         input.clear()
         let history = HistoryStore(fileURL: root.appendingPathComponent(".history-test.json"))
-        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
+        let library = LibraryViewModel(history: history, defaults: defaults,
+                                       macFolders: [root.appendingPathComponent("Rock"), root.appendingPathComponent("Party")])
         let navigation = AppNavigation()
         let queue = QueueViewModel(settings: settings, tools: tools, history: history, library: library)
         let mac = LibrarySource.macID
         try await waitUntil("Bibliothek eingelesen") { library.revision > 0 && !library.isScanning(mac) }
-        let rock = try XCTUnwrap(library.playlists(in: mac).first { $0.name == "Rock" })
-        let party = try XCTUnwrap(library.playlists(in: mac).first { $0.name == "Party" })
-        navigation.selection = .playlist(source: mac, id: rock.id)
+        let rock = try XCTUnwrap(library.folders(in: mac).first { $0.name == "Rock" })
+        let party = try XCTUnwrap(library.folders(in: mac).first { $0.name == "Party" })
+        navigation.selection = .folder(source: mac, id: rock.id)
 
         func environment<V: View>(_ view: V) -> some View {
             view
@@ -65,8 +66,7 @@ final class UIFlowSnapshotTests: XCTestCase {
         }
 
         // 1. Hinzufügen: ein Titel zum Auswählen und ein Link, Ziel „Rock“
-        settings.addTargetSource = mac
-        settings.addTargetPlaylist = "Rock"
+        settings.addTarget = rock.url
         navigation.selection = .add
         input.text = "Toto Africa Extended\nMe at the zoo\nhttps://youtu.be/jNQXAC9IVRw"
         let entries = input.parseNow().entries
@@ -98,14 +98,13 @@ final class UIFlowSnapshotTests: XCTestCase {
         queue.clearFinished()
         XCTAssertTrue(queue.items.isEmpty)
 
-        // 3. Die Playlist im Alltag (hell und dunkel)
-        try await waitUntil("Titel in Rock") { library.tracks(in: mac, playlistID: rock.id).contains { $0.title.contains("zoo") } }
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id)), "4-playlist", dark: false)
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: nil)), "4-alle-titel-dunkel", dark: true)
-        XCTAssertNotNil(party)
+        // 3. Der Ordner im Alltag (hell und dunkel)
+        try await waitUntil("Titel in Rock") { library.tracks(in: mac, folderID: rock.id).contains { $0.title.contains("zoo") } }
+        try await snapshot(environment(FolderScreen(sourceID: mac, folderID: rock.id)), "4-ordner", dark: false)
+        try await snapshot(environment(FolderScreen(sourceID: mac, folderID: party.id)), "4-ordner-dunkel", dark: true)
 
         // 5. Andere Version: den Titel in Rock austauschen
-        let downloaded = try XCTUnwrap(library.tracks(in: mac, playlistID: rock.id).first { $0.title.contains("zoo") })
+        let downloaded = try XCTUnwrap(library.tracks(in: mac, folderID: rock.id).first { $0.title.contains("zoo") })
         let replace = ReplaceViewModel(track: downloaded, tools: paths, settings: settings, library: library, history: history)
         replace.useLink("https://www.youtube.com/watch?v=jNQXAC9IVRw")
         try await waitUntil("Austauschen", timeout: 180) {

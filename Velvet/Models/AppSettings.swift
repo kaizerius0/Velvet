@@ -13,8 +13,7 @@ final class AppSettings: ObservableObject {
         static let cookieBrowser = "cookieBrowser"
         static let autoUpdateYtDlp = "autoUpdateYtDlp"
         static let skipExisting = "skipExisting"
-        static let addTargetSource = "addTargetSource"
-        static let addTargetPlaylist = "addTargetPlaylist"
+        static let addTargetPath = "addTargetPath"
     }
 
     private let defaults: UserDefaults
@@ -43,12 +42,9 @@ final class AppSettings: ObservableObject {
     @Published var autoUpdateYtDlp: Bool {
         didSet { defaults.set(autoUpdateYtDlp, forKey: Key.autoUpdateYtDlp) }
     }
-    /// Ziel für neue Titel: Bibliothek (Mac oder Stick-ID) und Playlist-Name („“ = Hauptordner).
-    @Published var addTargetSource: String {
-        didSet { defaults.set(addTargetSource, forKey: Key.addTargetSource) }
-    }
-    @Published var addTargetPlaylist: String {
-        didSet { defaults.set(addTargetPlaylist, forKey: Key.addTargetPlaylist) }
+    /// Der Ordner, in den neue Titel kommen („“ = noch keiner gewählt).
+    @Published var addTargetPath: String {
+        didSet { defaults.set(addTargetPath, forKey: Key.addTargetPath) }
     }
     /// Titel überspringen, die schon in der Bibliothek liegen.
     @Published var skipExisting: Bool {
@@ -73,8 +69,18 @@ final class AppSettings: ObservableObject {
         cookieBrowser = CookieBrowser(rawValue: defaults.string(forKey: Key.cookieBrowser) ?? "") ?? .none
         autoUpdateYtDlp = defaults.bool(forKey: Key.autoUpdateYtDlp)
         skipExisting = defaults.bool(forKey: Key.skipExisting)
-        addTargetSource = defaults.string(forKey: Key.addTargetSource) ?? LibrarySource.macID
-        addTargetPlaylist = defaults.string(forKey: Key.addTargetPlaylist) ?? ""
+        addTargetPath = defaults.string(forKey: Key.addTargetPath) ?? ""
+    }
+
+    /// Der gewählte Ordner – sofern es ihn gibt (ein abgezogener Stick zählt nicht).
+    var addTarget: URL? {
+        get {
+            var isDirectory: ObjCBool = false
+            guard !addTargetPath.isEmpty, FileManager.default.fileExists(atPath: addTargetPath, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return nil }
+            return URL(fileURLWithPath: addTargetPath, isDirectory: true)
+        }
+        set { addTargetPath = newValue?.standardizedFileURL.path ?? "" }
     }
 
     var qualityDescription: String {

@@ -1,10 +1,10 @@
 # Velvet
 
-**Deine Musik für unterwegs.** Velvet ist eine native macOS-App (SwiftUI): einen Titel oder eine ganze Liste eingeben, die passende Version per Wischen auswählen und als MP3 (oder MP4) in eine Playlist laden – auf dem Mac oder direkt auf den USB-Stick fürs Auto. Velvet verwaltet den Stick wie eine Musik-App.
+**Deine Musik für unterwegs.** Velvet ist eine native macOS-App (SwiftUI): einen Titel oder eine ganze Liste eingeben, die passende Version per Wischen auswählen und als MP3 (oder MP4) in einen Ordner laden – auf dem Mac oder direkt auf den USB-Stick fürs Auto. Velvet verwaltet den Stick wie eine Musik-App.
 
 - **Hinzufügen:** ein Titel oder 50 auf einmal – rechts siehst du sofort, was erkannt wurde und was schon vorhanden ist. Nummern, Aufzählungszeichen, Tabellen, Spotify-Exporte usw. werden automatisch erkannt
 - **Version auswählen per Wischen:** fünf Vorschläge mit Vorschaubild; zur Seite wischen lädt endlos weitere, zurückwischen geht jederzeit. Oder einfach einen eigenen Link einfügen
-- **Bibliothek wie in einer Musik-App:** dein Musikordner auf dem Mac und jeder eingesteckte Stick in der Seitenleiste, darunter die Playlists (= Ordner)
+- **Ordner wie Playlists:** deine Ordner auf dem Mac und jeder eingesteckte Stick mit seinen Ordnern stehen in der Seitenleiste – jeder unter seinem echten Namen
 - **Keine Doppelten:** schon vorhandene Titel sind markiert und werden übersprungen
 - **Andere Version:** falschen Titel erwischt? Rechtsklick → „Andere Version …“, z. B. die Extended Version – die alte Datei wird ersetzt
 - **Stick verwalten:** umbenennen, verschieben, vom Mac auf den Stick kopieren, löschen, fürs Auto aufräumen, auswerfen
@@ -17,9 +17,9 @@ yt-dlp, ffmpeg, ffprobe und deno sind **in der App enthalten** – nichts muss i
 |---|---|
 | ![Hinzufügen](Docs/hinzufuegen.png) | ![Auswahl](Docs/auswahl-dunkel.png) |
 
-| Playlist | Verlauf |
+| Ordner | Verlauf |
 |---|---|
-| ![Playlist](Docs/playlist.png) | ![Verlauf](Docs/verlauf.png) |
+| ![Ordner](Docs/ordner.png) | ![Verlauf](Docs/verlauf.png) |
 
 ---
 
@@ -66,17 +66,20 @@ Beim **allerersten Start** prüft Velvet die Werkzeuge und entpackt yt-dlp nach 
 
 ## So benutzt du Velvet
 
-**Links** in der Seitenleiste: ganz oben **Hinzufügen**, darunter dein Musikordner auf dem Mac (Standard: `~/Musik/Velvet`) und jeder eingesteckte Stick – mit seinen Playlists. Ein Stick erscheint automatisch, sobald er eingesteckt ist; **+** neben dem Namen legt eine Playlist an, ⏏︎ wirft ihn aus.
+**Links** in der Seitenleiste: ganz oben **Hinzufügen**, darunter **Dieser Mac** mit den Ordnern, die du dir dort hinlegst, und jeder eingesteckte Stick mit seinen Ordnern. Ein Ordner ist in Velvet das, was anderswo eine Playlist ist.
+
+- **Dieser Mac:** **+** → **Neuer Ordner …** (Ort und Namen wählen) oder **Vorhandenen Ordner hinzufügen …** – z. B. „Downloads“. Rechtsklick → **Aus der Seitenleiste entfernen** nimmt ihn wieder heraus, die Dateien bleiben.
+- **Stick:** erscheint automatisch, sobald er eingesteckt ist, und verschwindet beim Abziehen. **+** legt einen Ordner auf dem Stick an, ⏏︎ wirft ihn aus. Titel direkt auf dem Stick stehen unter dem Namen des Sticks.
 
 **Hinzufügen** (⌘L):
 1. Einen Titel oder eine ganze Liste ins große Feld schreiben oder einfügen – oder eine Textdatei aufs Fenster ziehen. Rechts steht, was erkannt wurde und was es schon gibt („Schon in AUTO-STICK › Rock“).
-2. Unten das **Ziel** wählen (z. B. „AUTO-STICK › Rock“ oder „Neue Playlist …“) und MP3 oder MP4.
+2. Unten den **Ordner** wählen – einen aus der Seitenleiste (z. B. „AUTO-STICK › Rock“ oder direkt „AUTO-STICK“) oder **Anderer Ordner …** für jeden beliebigen Ordner, auch einen neuen – und MP3 oder MP4. Ist noch keiner gewählt, fragt Velvet beim Hinzufügen nach.
 3. **„3 Titel hinzufügen“** (⌘↩). Links laden sofort, bei Titeln wählst du die passende Version: fünf Vorschläge mit Vorschaubild – **zur Seite wischen** (Trackpad) oder die Pfeile nutzen, dann kommen automatisch weitere, zurück geht auch. Passt nichts: Suchbegriff anpassen oder eigenen YouTube-Link einfügen.
-4. Während Titel laden, kannst du schon die nächsten eingeben. Fertige Titel zeigen **„In Playlist zeigen“** und **„Andere Version“**; **„Erledigte ausblenden“** räumt die Liste auf.
+4. Während Titel laden, kannst du schon die nächsten eingeben. Fertige Titel zeigen **„Im Ordner zeigen“** und **„Andere Version“**; **„Erledigte ausblenden“** räumt die Liste auf.
 
-In jeder Playlist führt **„Titel hinzufügen“** direkt dorthin – mit dieser Playlist als Ziel.
+In jedem Ordner führt **„Titel hinzufügen“** direkt dorthin – mit diesem Ordner als Ziel.
 
-**Rechtsklick auf einen Titel in einer Playlist:** Abspielen, **Andere Version …** (z. B. Extended – die alte Datei wird ersetzt), Umbenennen, **Verschieben nach** (andere Playlist), **Kopieren nach** (z. B. vom Mac auf den Stick), Im Finder zeigen, Löschen.
+**Rechtsklick auf einen Titel in einem Ordner:** Abspielen, **Andere Version …** (z. B. Extended – die alte Datei wird ersetzt), Umbenennen, **Verschieben nach** (anderer Ordner), **Kopieren nach** (z. B. vom Mac auf den Stick), Im Finder zeigen, Löschen.
 
 **Für das Auto:** Menü **…** oben rechts → **Für das Auto aufräumen** entfernt die unsichtbaren Mac-Begleitdateien (`._Titel.mp3`, `.DS_Store`), die viele Autoradios als kaputte Titel anzeigen. Danach **Auswerfen**.
 
@@ -89,7 +92,7 @@ Auf dem Stick löscht Velvet **endgültig** (ein Papierkorb auf dem Stick würde
 | ⌘L | Hinzufügen |
 | ⌘↩ | Titel hinzufügen (im Bereich Hinzufügen) |
 | ⌘O | Titel aus Datei hinzufügen |
-| ⌘N | Neue Playlist |
+| ⌘N | Neuer Ordner |
 | ⌘Y | Verlauf |
 | ⌘, | Einstellungen |
 
@@ -118,7 +121,7 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 
 - Videos: `Titel.mp4` (H.264/AAC bevorzugt – läuft in QuickTime, Fotos, iPhone). Bei „Beste“ kann es VP9/AV1 sein.
 - Audio: `Titel.mp3` mit Cover, Interpret und Titel als Tags (aus „Interpret - Titel“ abgeleitet).
-- Zwischendateien liegen versteckt in `.velvet-temp` im Ordner der Playlist und verschwinden, sobald der Titel fertig ist.
+- Zwischendateien liegen versteckt in `.velvet-temp` im Zielordner und verschwinden, sobald der Titel fertig ist.
 - Optional (Einstellungen): eine Archivdatei pro Ordner (`archive.txt` / `archive-mp3.txt`), damit yt-dlp schon geladene Videos überspringt. Standardmäßig aus – die Duplikat-Erkennung übernimmt das.
 
 ---
@@ -131,8 +134,6 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 - **Archivdatei im Ordner führen**
 - **Cookies aus Browser** – nur nötig für altersbeschränkte Videos oder wenn YouTube eine Bot-Prüfung verlangt. Du musst im Browser bei YouTube angemeldet sein; Safari braucht dafür „Festplattenvollzugriff“ für Velvet.
 - **Werkzeuge** – Versionen, „yt-dlp jetzt aktualisieren“, tägliche automatische Update-Prüfung
-
-Den Musikordner auf dem Mac änderst du über **…** → **Musikordner wählen …** (in einer Playlist auf dem Mac).
 
 ## Wenn etwas nicht klappt
 
@@ -151,7 +152,7 @@ Den Musikordner auf dem Mac änderst du über **…** → **Musikordner wählen 
 Velvet/
 ├─ App/            VelvetApp (Fenster, Menübefehle), AppDelegate (Beenden-Abfrage, Prozesse aufräumen), AppNavigation
 ├─ Models/         DownloadItem, ItemStatus, DownloadOptions, VideoCandidate, AppSettings, Formatters,
-│                  Library (VolumeInfo, LibrarySource, Playlist, Track, HistoryEntry, DuplicateHit)
+│                  Library (VolumeInfo, LibrarySource, LibraryFolder, Track, HistoryEntry, DuplicateHit)
 ├─ Services/       DownloadManager   – yt-dlp: Suche, Playlists, Downloads, Live-Fortschritt
 │                  ProcessRunner     – startet Prozesse, liefert Ausgabe zeilenweise, Abbruch & Timeout
 │                  ToolManager       – findet/prüft yt-dlp, ffmpeg, ffprobe, deno beim Start
@@ -159,13 +160,13 @@ Velvet/
 │                  YTDLPOutput       – liest Fortschritts-/Info-Zeilen, JSON, übersetzt Fehler ins Deutsche
 │                  ListParser        – erkennt Titel und Links in beliebig formatiertem Text
 │                  HistoryStore      – Verlauf (JSON), findet Dateien auch auf umbenannten Sticks
-│                  LibraryFiles      – Playlists einlesen, umbenennen, verschieben, löschen, fürs Auto aufräumen
+│                  LibraryFiles      – Ordner einlesen, umbenennen, verschieben, löschen, fürs Auto aufräumen
 │                  VolumeService     – Sticks erkennen und auswerfen
 │                  TitleMatcher, DuplicateChecker – „schon vorhanden?“ (gleich / ähnlich)
 │                  YouTubeLink, TextFileLoader
-├─ ViewModels/     LibraryViewModel (Mac-Ordner & Sticks, Playlists), QueueViewModel (Warteschlange je Playlist),
+├─ ViewModels/     LibraryViewModel (Mac-Ordner & Sticks), QueueViewModel (Warteschlange je Zielordner),
 │                  InputViewModel (Eingabe), ReplaceViewModel (andere Version)
-└─ Views/          ContentView (Seitenleiste), AddScreen, CandidateViews (Wisch-Auswahl), PlaylistScreen, HistoryScreen, …
+└─ Views/          ContentView (Seitenleiste), AddScreen, CandidateViews (Wisch-Auswahl), FolderScreen, HistoryScreen, …
 Binaries/          yt-dlp_macos.zip, ffmpeg, ffprobe, deno (per Script geladen)
 Scripts/           fetch-binaries.sh, install.sh, make-release.sh
 VelvetTests/       Parser-, Ausgabe-, Integrations- und UI-Ablauf-Tests
@@ -174,7 +175,7 @@ VelvetTests/       Parser-, Ausgabe-, Integrations- und UI-Ablauf-Tests
 - **MVVM**: Views kennen nur ViewModels; die ViewModels nutzen die Services. `DownloadManager` ist ein eigener Service ohne UI-Abhängigkeit.
 - **Fortschritt**: yt-dlp wird mit `--progress-template` und `--print` gestartet und liefert maschinenlesbare Zeilen (`VELVET|DL|…`). Bei getrennten Video- und Tonspuren wird der Fortschritt gewichtet zusammengerechnet; Nachbearbeitung (Zusammenführen, MP3-Umwandlung, Cover) wird mit Klartext angezeigt.
 - **Suche**: `ytsearch` mit `--flat-playlist` (eine Anfrage, ca. 1 Sekunde). Beim Wischen werden jeweils fünf weitere, noch nicht gezeigte Videos angehängt.
-- **Warteschlange**: Jeder Titel kennt seine Ziel-Playlist; mehrere laden parallel. Fertige Titel verschwinden aus der Warteschlange und stehen dann in der Playlist.
+- **Warteschlange**: Jeder Titel kennt seinen Zielordner; mehrere laden parallel. Fertige Titel stehen danach im Ordner.
 - **yt-dlp**: Velvet nutzt das offizielle `yt-dlp_macos.zip` statt der Einzeldatei `yt-dlp_macos`. Grund: Die Einzeldatei entpackt sich bei *jedem* Aufruf neu und braucht dafür ca. 7 Sekunden – bei jeder Suche und jedem Download. Die Ordner-Variante startet in 0,2 Sekunden. Weil sie sich nicht selbst aktualisieren kann, übernimmt Velvet das Update (Download von GitHub, SHA-256-Prüfung, Testlauf, dann Austausch).
 - **deno** wird von yt-dlp benötigt, um YouTubes JavaScript-Prüfungen zu lösen – ohne fehlen viele Formate.
 - Keine App-Sandbox (yt-dlp braucht freien Zugriff auf den gewählten Ordner und das Netzwerk). Hardened Runtime ist aktiv. Während Downloads laufen, verhindert Velvet den Ruhezustand; offene Auswahlen zeigt das Dock-Symbol als Zahl.
