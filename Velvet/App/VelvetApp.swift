@@ -41,9 +41,9 @@ struct VelvetApp: App {
                     await tools.prepare(autoUpdate: settings.autoUpdateYtDlp)
                 }
         }
-        .defaultSize(width: 1320, height: 880)
+        .defaultSize(width: 1240, height: 820)
         .commands {
-            VelvetCommands(input: input, queue: queue, navigation: navigation)
+            VelvetCommands(input: input, navigation: navigation)
         }
 
         Settings {
@@ -57,45 +57,37 @@ struct VelvetApp: App {
 
 struct VelvetCommands: Commands {
     @ObservedObject var input: InputViewModel
-    @ObservedObject var queue: QueueViewModel
     @ObservedObject var navigation: AppNavigation
 
     var body: some Commands {
-        CommandGroup(before: .sidebar) {
-            ForEach(Array(AppNavigation.Section.allCases.enumerated()), id: \.element) { index, section in
-                Button(section.title) { navigation.section = section }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
-            }
-            Divider()
-        }
-
         CommandGroup(replacing: .newItem) {
-            Button("Neue Liste") {
-                if !queue.hasBusyItems || Dialogs.confirm(
-                    title: "Neue Liste beginnen?",
-                    message: "Laufende Downloads werden abgebrochen. Bereits geladene Dateien bleiben erhalten.",
-                    confirmTitle: "Abbrechen und neu beginnen"
-                ) {
-                    queue.reset()
-                }
+            Button("Neue Playlist") {
+                navigation.newPlaylistSource = navigation.sourceID ?? LibrarySource.macID
             }
             .keyboardShortcut("n")
-            .disabled(!queue.hasRun)
 
-            Button("Liste aus .txt-Datei laden …") {
-                navigation.section = .downloads
+            Button("Mehrere Titel hinzufügen …") {
+                navigation.showAddSeveral = true
+            }
+            .keyboardShortcut("l")
+
+            Button("Titel aus Datei hinzufügen …") {
                 input.chooseFile()
+                if !input.text.isEmpty { navigation.showAddSeveral = true }
             }
             .keyboardShortcut("o")
-            .disabled(queue.hasRun)
-
-            Divider()
-
-            Button("Zielordner im Finder öffnen") {
-                queue.openDestination()
+        }
+        CommandGroup(after: .textEditing) {
+            Button("Titel suchen") {
+                if navigation.selection == .history { navigation.selection = .allTracks(source: LibrarySource.macID) }
+                navigation.focusSearch = UUID()
             }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-            .disabled(queue.destination == nil)
+            .keyboardShortcut("f")
+        }
+        CommandGroup(before: .sidebar) {
+            Button("Verlauf") { navigation.selection = .history }
+                .keyboardShortcut("y")
+            Divider()
         }
     }
 }

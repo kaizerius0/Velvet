@@ -1,6 +1,6 @@
 import Foundation
 
-/// Ein Eintrag der Download-Liste – vom Suchbegriff bzw. Link bis zur fertigen Datei.
+/// Ein Titel, der gerade hinzugefügt wird – vom Suchbegriff bzw. Link bis zur fertigen Datei.
 @MainActor
 final class DownloadItem: ObservableObject, Identifiable {
     enum Origin {
@@ -12,10 +12,12 @@ final class DownloadItem: ObservableObject, Identifiable {
 
     let id = UUID()
     let origin: Origin
-    /// Der ursprüngliche Text aus der Liste.
+    /// Der ursprüngliche Text (Suchbegriff oder Link).
     let originalText: String
+    /// Ordner (Playlist), in den der Titel geladen wird.
+    let destination: URL
+    let options: DownloadOptions
 
-    @Published var number: Int
     @Published var status: ItemStatus
     @Published var query: String
     @Published var sourceURL: URL?
@@ -27,7 +29,7 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var candidates: [VideoCandidate] = []
     @Published var page = 0
     @Published var hasSearched = false
-    /// Bereits gezeigte Vorschläge – „Andere Vorschläge“ bringt nur neue.
+    /// Bereits gezeigte Vorschläge – „Weitere Vorschläge“ bringt nur neue.
     var seenCandidateIDs: Set<String> = []
 
     @Published var progress: Double = 0
@@ -40,7 +42,7 @@ final class DownloadItem: ObservableObject, Identifiable {
     var allowAutoPick = true
     /// Archiv für diesen einen Download ignorieren („Trotzdem laden“).
     var ignoreArchive = false
-    /// Wird nach erfolgreichem Ersatz-Download in den Papierkorb gelegt.
+    /// Wird nach erfolgreichem Ersatz-Download gelöscht.
     var replacedFile: URL?
     var replacedVideoID: String?
 
@@ -50,8 +52,9 @@ final class DownloadItem: ObservableObject, Identifiable {
     var searchToken: UUID?
     var downloadToken: UUID?
 
-    init(entry: ParsedEntry, number: Int) {
-        self.number = number
+    init(entry: ParsedEntry, destination: URL, options: DownloadOptions) {
+        self.destination = destination
+        self.options = options
         switch entry.kind {
         case let .url(url):
             origin = .link
@@ -69,16 +72,18 @@ final class DownloadItem: ObservableObject, Identifiable {
         }
     }
 
-    /// Ein Video aus einer aufgelösten Playlist.
-    init(candidate: VideoCandidate, number: Int) {
-        self.number = number
-        origin = .link
-        originalText = candidate.title
-        query = candidate.title
+    /// Ein schon gewähltes Video – aus der Suche oder einer aufgelösten Playlist.
+    init(candidate: VideoCandidate, query: String?, destination: URL, options: DownloadOptions) {
+        self.destination = destination
+        self.options = options
+        origin = query == nil ? .link : .search
+        originalText = query ?? candidate.title
+        self.query = query ?? candidate.title
         title = candidate.title
         sourceURL = candidate.url
         videoID = candidate.id
         chosen = candidate
+        hasSearched = query != nil
         status = .waiting
     }
 
@@ -91,24 +96,11 @@ final class DownloadItem: ObservableObject, Identifiable {
         }
     }
 
-    var subtitle: String {
-        var parts: [String] = []
-        switch origin {
-        case .search:
-            parts.append("Suche: „\(originalText)“")
-        case .link:
-            if let sourceURL { parts.append(Self.shortLink(sourceURL)) }
-        }
-        if let channel = chosen?.channel { parts.append(channel) }
-        if let duration = chosen?.durationText { parts.append(duration) }
-        return parts.joined(separator: " · ")
-    }
-
     var thumbnailURL: URL? {
         chosen?.thumbnailURL ?? videoID.map(YouTubeLink.thumbnailURL)
     }
 
-    /// „Andere Vorschläge“ geht nur, wenn ein Suchbegriff oder Titel bekannt ist.
+    /// „Weitere Vorschläge“ geht nur, wenn ein Suchbegriff oder Titel bekannt ist.
     var canSuggest: Bool {
         !query.trimmingCharacters(in: .whitespaces).isEmpty || title != nil
     }

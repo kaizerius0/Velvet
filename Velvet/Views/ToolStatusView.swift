@@ -7,6 +7,12 @@ struct ToolStatusBadge: View {
     @State private var showDetails = false
 
     var body: some View {
+        if tools.state != .ready || tools.isUpdating {
+            badge
+        }
+    }
+
+    private var badge: some View {
         Button {
             showDetails.toggle()
         } label: {
@@ -14,10 +20,10 @@ struct ToolStatusBadge: View {
                 switch tools.state {
                 case .checking:
                     ProgressView().controlSize(.small)
-                    Text("Werkzeuge werden geprüft …")
+                    Text("Wird vorbereitet …")
                 case .ready:
                     Circle().fill(.green).frame(width: 8, height: 8)
-                    Text(tools.isUpdating ? "Bereit · yt-dlp wird aktualisiert …" : "Bereit")
+                    Text(tools.isUpdating ? "yt-dlp wird aktualisiert …" : "Bereit")
                 case .failed:
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Text("Werkzeuge fehlen")
@@ -110,9 +116,6 @@ struct ToolFailureBanner: View {
                 Text(message)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Tipp: Im Projektordner einmal „Scripts/fetch-binaries.sh“ ausführen und die App neu bauen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             Spacer()
             Button("Erneut prüfen") {

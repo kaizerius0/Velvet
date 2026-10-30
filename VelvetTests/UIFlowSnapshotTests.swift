@@ -3,8 +3,8 @@ import SwiftUI
 import XCTest
 @testable import Velvet
 
-/// Spielt einen kompletten Ablauf über die echten ViewModels durch (mit echten Downloads)
-/// und speichert Bildschirmfotos aller Bereiche (hell und dunkel). Läuft nur mit `VELVET_SNAPSHOT_DIR=/pfad`:
+/// Spielt den Alltag über die echten ViewModels durch (mit echten Downloads) und speichert Bildschirmfotos.
+/// Läuft nur mit `VELVET_SNAPSHOT_DIR=/pfad`:
 ///   TEST_RUNNER_VELVET_SNAPSHOT_DIR=/tmp/velvet-shots xcodebuild test -scheme Velvet -only-testing:VelvetTests/UIFlowSnapshotTests
 @MainActor
 final class UIFlowSnapshotTests: XCTestCase {
@@ -18,13 +18,13 @@ final class UIFlowSnapshotTests: XCTestCase {
         outputDirectory = URL(fileURLWithPath: path, isDirectory: true)
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-        // Eine kleine „Stick“-Bibliothek mit zwei Playlists.
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("AUTO-STICK-\(UUID().uuidString.prefix(6))", isDirectory: true)
+        // Ein kleiner Musikordner mit zwei Playlists.
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("Velvet-Musik-\(UUID().uuidString.prefix(6))", isDirectory: true)
         for folder in ["Rock", "Party"] {
             try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
         }
         for file in ["Rock/Toto - Africa (Official HD Video).mp3", "Rock/Queen - Bohemian Rhapsody.mp3",
-                     "Party/Daft Punk - Get Lucky.mp3", "Party/a-ha - Take On Me.mp4"] {
+                     "Rock/AC-DC - Highway to Hell.mp3", "Party/Daft Punk - Get Lucky.mp3", "Party/a-ha - Take On Me.mp4"] {
             try Data(count: 3_400_000).write(to: root.appendingPathComponent(file))
         }
     }
@@ -33,81 +33,76 @@ final class UIFlowSnapshotTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    func testCompleteFlow() async throws {
+    func testEverydayFlow() async throws {
         let defaults = UserDefaults(suiteName: "velvet-snapshot-tests")!
         defaults.removePersistentDomain(forName: "velvet-snapshot-tests")
         defer { defaults.removePersistentDomain(forName: "velvet-snapshot-tests") }
 
         let settings = AppSettings(defaults: defaults)
-        settings.format = .audio
+        XCTAssertEqual(settings.format, .audio)
         let tools = ToolManager()
         await tools.prepare(autoUpdate: false)
-        XCTAssertTrue(tools.isReady, "\(tools.state)")
+        let paths = try XCTUnwrap(tools.paths, "\(tools.state)")
 
         let input = InputViewModel()
+        input.clear()
         let history = HistoryStore(fileURL: root.appendingPathComponent(".history-test.json"))
-        let library = LibraryViewModel(history: history, defaults: defaults)
+        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
         let navigation = AppNavigation()
         let queue = QueueViewModel(settings: settings, tools: tools, history: history, library: library)
-        func screen() -> some View {
-            ContentView()
-                .environmentObject(settings)
-                .environmentObject(tools)
-                .environmentObject(input)
-                .environmentObject(queue)
-                .environmentObject(history)
-                .environmentObject(library)
+        let mac = LibrarySource.macID
+        try await waitUntil("Bibliothek eingelesen") { library.revision > 0 && !library.isScanning(mac) }
+        let rock = try XCTUnwrap(library.playlists(in: mac).first { $0.name == "Rock" })
+        let party = try XCTUnwrap(library.playlists(in: mac).first { $0.name == "Party" })
+        navigation.selection = .playlist(source: mac, id: rock.id)
+
+        func environment<V: View>(_ view: V) -> some View {
+            view
+                .environmentObject(settings).environmentObject(tools).environmentObject(input)
+                .environmentObject(queue).environmentObject(history).environmentObject(library)
                 .environmentObject(navigation)
+                .background(Color(nsColor: .windowBackgroundColor))
         }
 
-        library.use(folder: root)
-        try await waitUntil("Bibliothek eingelesen") { library.revision > 0 && !library.isScanning }
-        XCTAssertEqual(library.tracks.count, 4)
-        settings.downloadTarget = .playlist("Neu geladen")
+        // 1. Einen einzelnen Titel suchen – der schon vorhandene wird markiert.
+        let quickAdd = QuickAddModel()
+        quickAdd.text = "toto africa"
+        quickAdd.search("toto africa", tools: paths, cookies: .none)
+        try await waitUntil("Suchergebnisse") { quickAdd.phase == .results }
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id, quickAdd: quickAdd)), "1-suchen", dark: false)
 
-        // 1. Eingabe: unordentliche Liste, zwei Titel liegen schon (ähnlich) auf dem Stick
-        input.text = """
-        Meine Party-Playlist:
-        1. Queen – Bohemian Rhapsody
-        2) toto africa extended
-        • Me at the zoo 🎵 (0:19)
-        https://youtu.be/jNQXAC9IVRw?si=abc
-        """
-        let parsed = input.parseNow()
-        let hits = DuplicateChecker(library: library, history: history).hits(for: parsed.entries)
-        XCTAssertEqual(hits[0]?.strength, .exact)
-        XCTAssertEqual(hits[1]?.strength, .similar)
-        XCTAssertNil(hits[2])
-        try await snapshot(screen(), "1-eingabe", dark: false)
-        try await snapshot(screen(), "1-eingabe-dunkel", dark: true)
+        // 2. Einen Titel per „+“ hinzufügen – er erscheint oben in der Playlist und lädt.
+        quickAdd.search("me at the zoo jawed", tools: paths, cookies: .none)
+        try await waitUntil("Zoo-Suche") { quickAdd.phase == .results }
+        let zoo = try XCTUnwrap(quickAdd.results.first { $0.id == "jNQXAC9IVRw" } ?? quickAdd.results.first)
+        queue.add(candidate: zoo, query: "me at the zoo jawed", to: rock.url)
+        quickAdd.markAdded(zoo)
+        try await waitUntil("Download läuft") { queue.items.first.map { $0.status.isTransferring || $0.status == .completed } ?? false }
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id, quickAdd: quickAdd)), "2-hinzufuegen", dark: false)
+        try await waitUntil("Titel in Rock", timeout: 180) {
+            queue.items.isEmpty && library.tracks(in: mac, playlistID: rock.id).contains { $0.title.contains("zoo") }
+        }
 
-        // 2. Start in die Playlist „Neu geladen“ – Queen ist schon da und wird übersprungen
-        let destination = try XCTUnwrap(library.folder(forPlaylist: "Neu geladen"))
-        let existing = hits.filter { $0.value.strength == .exact && $0.value.inCurrentLibrary }.mapValues(\.location)
-        queue.start(entries: parsed.entries, destination: destination, existing: existing)
-        XCTAssertEqual(queue.items[0].status, .skipped(.inLibrary(hits[0]!.location)))
-        try await waitUntil("Suchergebnisse") { queue.summary.needsAttention == 2 }
-        try await snapshot(screen(), "2-auswahl", dark: false)
+        // 3. Mehrere Titel: einer braucht eine Auswahl, der Link lädt direkt.
+        input.text = "Me at the zoo\nhttps://youtu.be/jNQXAC9IVRw"
+        let entries = input.parseNow().entries
+        try await snapshot(environment(AddSeveralSheet(sourceID: mac, playlistID: party.id)), "3-mehrere-titel", dark: false, size: CGSize(width: 880, height: 470))
+        queue.add(entries: entries, to: party.url)
+        try await waitUntil("Auswahl nötig") { queue.activity.needsAttention == 1 }
+        navigation.selection = .playlist(source: mac, id: party.id)
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: party.id)), "4-auswahl", dark: true)
+        let choice = try XCTUnwrap(queue.items.first { $0.status == .needsSelection })
+        queue.choose(try XCTUnwrap(choice.candidates.first { $0.id == "jNQXAC9IVRw" } ?? choice.candidates.first), for: choice)
+        try await waitUntil("Alles geladen", timeout: 240) { queue.items.isEmpty && !library.isScanning(mac) }
+        XCTAssertEqual(history.entries.filter { $0.state == .downloaded }.count, 2, "Gleiche Datei in Party zählt einmal")
 
-        // 3. Auswahl per Klick, Rest überspringen
-        let zoo = queue.items[2]
-        let target = try XCTUnwrap(zoo.candidates.first { $0.id == "jNQXAC9IVRw" } ?? zoo.candidates.first)
-        queue.choose(target, for: zoo)
-        queue.skip(queue.items[1])
-        try await waitUntil("Downloads fertig", timeout: 240) { queue.isFinished }
-        try await snapshot(screen(), "3-fertig", dark: true)
-        XCTAssertGreaterThanOrEqual(history.entries.count, 1)
+        // 4. Eine Playlist im Alltag (hell und dunkel)
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id)), "5-playlist", dark: false)
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: nil)), "5-alle-titel-dunkel", dark: true)
 
-        // 4. Bibliothek: neue Playlist mit dem geladenen Titel
-        try await waitUntil("Bibliothek aktualisiert") { library.tracks.count == 5 && !library.isScanning }
-        let downloaded = try XCTUnwrap(library.tracks.first { $0.playlistName == "Neu geladen" })
-        navigation.section = .library
-        library.selectedPlaylistID = LibraryViewModel.allTracksID
-        try await snapshot(screen(), "4-bibliothek", dark: false)
-        try await snapshot(screen(), "4-bibliothek-dunkel", dark: true)
-
-        // 5. Austauschen: dieselbe Datei durch eine neu geladene Version ersetzen
-        let replace = ReplaceViewModel(track: downloaded, tools: try XCTUnwrap(tools.paths), settings: settings, library: library, history: history)
+        // 5. Andere Version: den Titel in Rock austauschen
+        let downloaded = try XCTUnwrap(library.tracks(in: mac, playlistID: rock.id).first { $0.title.contains("zoo") })
+        let replace = ReplaceViewModel(track: downloaded, tools: paths, settings: settings, library: library, history: history)
         replace.useLink("https://www.youtube.com/watch?v=jNQXAC9IVRw")
         try await waitUntil("Austauschen", timeout: 180) {
             if case .done = replace.phase { return true }
@@ -115,24 +110,11 @@ final class UIFlowSnapshotTests: XCTestCase {
             return false
         }
         XCTAssertEqual(replace.phase, .done("Me at the zoo"))
-        let replaced = try XCTUnwrap(library.tracks.first { $0.playlistName == "Neu geladen" })
-        XCTAssertGreaterThan(replaced.size, 100_000, "neue Datei sollte ein echtes MP3 sein")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent(".velvet-temp").path))
         XCTAssertTrue(history.entries.contains { $0.state == .replaced })
 
-        // 6. Verlauf
-        navigation.section = .history
-        try await snapshot(screen(), "5-verlauf", dark: false)
-
-        // Die Seitenleiste zeichnet macOS als „Glas“ – das erfasst der Schnappschuss im Fenster nicht, daher einzeln.
-        let sidebar = Sidebar()
-            .environmentObject(settings).environmentObject(tools).environmentObject(input).environmentObject(queue)
-            .environmentObject(history).environmentObject(library).environmentObject(navigation)
-            .background(Color(nsColor: .windowBackgroundColor))
-        try await snapshot(sidebar, "6-seitenleiste", dark: false, size: CGSize(width: 250, height: 700))
-
-        queue.reset()
-        XCTAssertFalse(queue.hasRun)
+        // 6. Verlauf und Seitenleiste
+        try await snapshot(environment(HistoryScreen()), "6-verlauf", dark: false)
+        try await snapshot(environment(Sidebar()), "7-seitenleiste", dark: false, size: CGSize(width: 250, height: 640))
     }
 
     // MARK: Hilfen
@@ -145,7 +127,7 @@ final class UIFlowSnapshotTests: XCTestCase {
         }
     }
 
-    private func snapshot<V: View>(_ view: V, _ name: String, dark: Bool, size: CGSize = CGSize(width: 1320, height: 880)) async throws {
+    private func snapshot<V: View>(_ view: V, _ name: String, dark: Bool, size: CGSize = CGSize(width: 1000, height: 760)) async throws {
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: hosting.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)

@@ -21,7 +21,7 @@ enum TextFileLoader {
         var errorDescription: String? {
             switch self {
             case let .unsupported(name): return "„\(name)“ ist keine Textdatei."
-            case let .tooLarge(name): return "„\(name)“ ist zu groß für eine Liste."
+            case let .tooLarge(name): return "„\(name)“ ist zu groß."
             case let .unreadable(name): return "„\(name)“ konnte nicht gelesen werden."
             }
         }

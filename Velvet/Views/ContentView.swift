@@ -1,182 +1,193 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var queue: QueueViewModel
     @EnvironmentObject private var navigation: AppNavigation
+    @EnvironmentObject private var library: LibraryViewModel
 
     var body: some View {
         NavigationSplitView {
             Sidebar()
-                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 300)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
         } detail: {
-            switch navigation.section ?? .downloads {
-            case .downloads:
-                Group {
-                    if queue.hasRun {
-                        QueueScreen()
-                    } else {
-                        InputScreen()
-                    }
+            detail
+        }
+        .frame(minWidth: 980, minHeight: 640)
+        .sheet(isPresented: $navigation.showAddSeveral) {
+            AddSeveralSheet(sourceID: currentSourceID, playlistID: navigation.playlistID)
+        }
+        .sheet(item: Binding(
+            get: { navigation.newPlaylistSource.map(SheetID.init) },
+            set: { navigation.newPlaylistSource = $0?.id }
+        )) { sheet in
+            NameSheet(title: "Neue Playlist", initial: "", confirm: "Erstellen") { name in
+                if let playlist = library.createPlaylist(named: name, in: sheet.id) {
+                    navigation.selection = .playlist(source: sheet.id, id: playlist.id)
                 }
-                .navigationTitle("Downloads")
-            case .library:
-                LibraryScreen()
-                    .navigationTitle("Bibliothek")
-            case .history:
-                HistoryScreen()
-                    .navigationTitle("Verlauf")
             }
         }
-        .frame(minWidth: 1080, minHeight: 700)
+        .onChange(of: library.newlyMountedSourceID) { id in
+            if let id { navigation.selection = .allTracks(source: id) }
+        }
+        .onChange(of: library.sources) { sources in
+            // Ausgeworfener Stick: zurück zum Mac.
+            if let source = navigation.sourceID, !sources.contains(where: { $0.id == source }) {
+                navigation.selection = .allTracks(source: LibrarySource.macID)
+            }
+        }
+        .alert("Hinweis", isPresented: Binding(
+            get: { library.errorMessage != nil },
+            set: { if !$0 { library.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(library.errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch navigation.selection {
+        case .history:
+            HistoryScreen()
+                .navigationTitle("Verlauf")
+        case let .playlist(source, id):
+            PlaylistScreen(sourceID: source, playlistID: id)
+                .id(navigation.selection)
+        case let .allTracks(source):
+            PlaylistScreen(sourceID: source, playlistID: nil)
+                .id(navigation.selection)
+        case .none:
+            PlaylistScreen(sourceID: LibrarySource.macID, playlistID: nil)
+        }
+    }
+
+    private var currentSourceID: String {
+        navigation.sourceID ?? LibrarySource.macID
+    }
+
+    private struct SheetID: Identifiable {
+        let id: String
     }
 }
 
-/// Seitenleiste: Bereiche, gewähltes Laufwerk und Werkzeug-Status.
+/// Seitenleiste: jede Bibliothek (Mac, Sticks) mit ihren Playlists, dazu der Verlauf.
 struct Sidebar: View {
     @EnvironmentObject private var navigation: AppNavigation
-    @EnvironmentObject private var queue: QueueViewModel
     @EnvironmentObject private var library: LibraryViewModel
+    @EnvironmentObject private var queue: QueueViewModel
+
+    @State private var renameTarget: Playlist?
+    @State private var deleteTarget: Playlist?
 
     var body: some View {
-        List(selection: $navigation.section) {
-            Section {
-                ForEach(AppNavigation.Section.allCases, id: \.self) { section in
-                    Label(section.title, systemImage: section.symbol)
-                        .badge(badge(for: section))
-                        .tag(section)
+        List(selection: $navigation.selection) {
+            ForEach(library.sources) { source in
+                Section {
+                    Label("Alle Titel", systemImage: "music.note")
+                        .badge(library.tracks(in: source.id).count)
+                        .tag(AppNavigation.Item.allTracks(source: source.id))
+                    ForEach(visiblePlaylists(in: source)) { playlist in
+                        Label(playlist.displayName, systemImage: playlist.isRoot ? "folder" : "music.note.list")
+                            .badge(playlist.trackCount)
+                            .tag(AppNavigation.Item.playlist(source: source.id, id: playlist.id))
+                            .contextMenu { playlistMenu(playlist) }
+                    }
+                } header: {
+                    SourceHeader(source: source)
                 }
+            }
+            Section {
+                Label("Verlauf", systemImage: "clock.arrow.circlepath")
+                    .tag(AppNavigation.Item.history)
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .top) {
-            SidebarHeader()
-        }
         .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 10) {
-                DrivePanel()
-                Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                ActivityButton()
                 ToolStatusBadge()
+                #if DEBUG
+                Text("Entwicklungsversion")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+                #endif
             }
-            .padding(12)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
-    }
-
-    private func badge(for section: AppNavigation.Section) -> Int {
-        switch section {
-        case .downloads: return queue.summary.needsAttention
-        case .library: return library.tracks.count
-        case .history: return 0
-        }
-    }
-}
-
-private struct SidebarHeader: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            LogoMark(size: 30)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    Text("Velvet")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                    #if DEBUG
-                    Text("DEV")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.orange.opacity(0.18)))
-                        .help("Entwicklungsversion aus Xcode – die normale App liegt unter /Programme.")
-                    #endif
+        .sheet(item: $renameTarget) { playlist in
+            NameSheet(title: "Playlist umbenennen", initial: playlist.name, confirm: "Umbenennen") { name in
+                let wasSelected = navigation.playlistID == playlist.id
+                if let newID = library.rename(playlist, to: name), wasSelected, let source = library.source(containing: playlist.url) {
+                    navigation.selection = .playlist(source: source.id, id: newID)
                 }
-                Text("Deine Musik für unterwegs")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .confirmationDialog("„\(deleteTarget?.name ?? "")“ löschen?", isPresented: Binding(
+            get: { deleteTarget != nil },
+            set: { if !$0 { deleteTarget = nil } }
+        )) {
+            Button("Löschen", role: .destructive) {
+                if let playlist = deleteTarget { library.delete(playlist) }
+                deleteTarget = nil
+            }
+        } message: {
+            if let playlist = deleteTarget {
+                Text(library.deletesPermanently(at: playlist.url)
+                     ? "Der Ordner und \(Formatters.count(playlist.trackCount, "Titel", "Titel")) werden endgültig vom Stick gelöscht."
+                     : "Der Ordner und \(Formatters.count(playlist.trackCount, "Titel", "Titel")) kommen in den Papierkorb.")
+            }
+        }
+    }
+
+    /// Der Hauptordner erscheint nur, wenn dort auch Titel liegen.
+    private func visiblePlaylists(in source: LibrarySource) -> [Playlist] {
+        library.playlists(in: source.id).filter { !$0.isRoot || $0.trackCount > 0 }
+    }
+
+    @ViewBuilder
+    private func playlistMenu(_ playlist: Playlist) -> some View {
+        Button("Im Finder zeigen") { library.reveal([playlist.url]) }
+        if !playlist.isRoot {
+            Button("Umbenennen …") { renameTarget = playlist }
+            Divider()
+            Button("Löschen …", role: .destructive) { deleteTarget = playlist }
+        }
     }
 }
 
-/// Zeigt den gewählten Stick mit freiem Speicher; wechseln und auswerfen.
-struct DrivePanel: View {
+/// Abschnittskopf einer Bibliothek: Name, „+“ für neue Playlists, Auswerfen bei Sticks.
+private struct SourceHeader: View {
+    @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
-    @EnvironmentObject private var navigation: AppNavigation
+    let source: LibrarySource
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("LAUFWERK")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            Menu {
-                if library.volumes.isEmpty {
-                    Text("Kein Stick eingesteckt")
-                }
-                ForEach(library.volumes) { volume in
-                    Button {
-                        library.use(volume: volume)
-                        navigation.section = .library
-                    } label: {
-                        Label(volume.name, systemImage: "externaldrive")
-                    }
-                }
-                Divider()
-                Button("Ordner auf diesem Mac …") {
-                    library.chooseFolder()
-                    navigation.section = .library
-                }
+        HStack(spacing: 6) {
+            Text(source.name)
+            if library.isScanning(source.id) {
+                ProgressView().controlSize(.mini)
+            }
+            Spacer()
+            Button {
+                navigation.newPlaylistSource = source.id
             } label: {
-                Label(title, systemImage: symbol)
-                    .lineLimit(1)
+                Image(systemName: "plus")
             }
-            .menuStyle(.borderlessButton)
-            .help("Laufwerk oder Ordner wählen, den Velvet verwaltet")
+            .buttonStyle(.borderless)
+            .help("Neue Playlist")
 
-            if case .offline = library.status {
-                Text("Nicht verbunden – Stick einstecken")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            } else if let volume = library.volume, let used = volume.usedFraction, let text = volume.freeSpaceText {
-                ProgressView(value: used)
-                    .progressViewStyle(.linear)
-                    .tint(used > 0.9 ? .orange : .accentColor)
-                Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if library.status == .ready, library.isExternal {
+            if source.isExternal {
                 Button {
-                    Task { await library.eject() }
+                    Task { await library.eject(source.id) }
                 } label: {
-                    Label("Auswerfen", systemImage: "eject")
+                    Image(systemName: "eject")
                 }
                 .buttonStyle(.borderless)
-                .disabled(isWritingToLibrary)
-                .help(isWritingToLibrary ? "Es laufen noch Downloads auf diesen Stick." : "Stick sicher auswerfen")
+                .disabled(queue.isWriting(to: source.rootURL))
+                .help(queue.isWriting(to: source.rootURL) ? "Es werden noch Titel auf diesen Stick geladen" : "Auswerfen")
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var isWritingToLibrary: Bool {
-        guard queue.hasBusyItems, let destination = queue.destination else { return false }
-        return library.contains(destination)
-    }
-
-    private var title: String {
-        library.location?.displayName ?? "Laufwerk wählen …"
-    }
-
-    private var symbol: String {
-        switch library.status {
-        case .none: return "externaldrive.badge.plus"
-        case .offline: return "externaldrive.badge.xmark"
-        case .ready: return library.isExternal ? "externaldrive.fill" : "folder.fill"
         }
     }
 }

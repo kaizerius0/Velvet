@@ -114,7 +114,7 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
             useArchive: false,
             cookieBrowser: settings.cookieBrowser
         )
-        let permanently = library.deletesPermanently
+        let permanently = library.deletesPermanently(at: track.url)
 
         task = Task { [weak self, manager] in
             // Die alte Datei zur Seite legen, damit eine gleichnamige neue Datei nicht übersprungen wird.
@@ -150,7 +150,7 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
                     self.history.recordDownload(title: title ?? newTitle, query: self.query, videoID: videoID, sourceURL: url, file: file)
                     self.progress = 1
                     self.phase = .done(newTitle)
-                    self.library.rescan()
+                    self.library.refreshIfAffected(by: file)
                 case .skipped:
                     restore()
                     self.phase = .failed("Das Video wurde übersprungen (Livestream?). Die alte Datei bleibt erhalten.")

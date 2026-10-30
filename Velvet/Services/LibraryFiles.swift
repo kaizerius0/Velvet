@@ -46,7 +46,9 @@ enum LibraryFiles {
 
         var playlists: [Playlist] = []
         for folder in contents(of: root) {
-            guard (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+            // Ordner sind Playlists – Programme und andere Pakete (z. B. „Velvet.app“) nicht.
+            guard let values = try? folder.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]),
+                  values.isDirectory == true, values.isPackage != true,
                   !ignoredFolders.contains(folder.lastPathComponent) else { continue }
             let folderTracks = tracks(in: folder, playlist: folder.lastPathComponent)
             snapshot.tracks += folderTracks

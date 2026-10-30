@@ -7,12 +7,15 @@ enum VolumeService {
         .volumeNameKey, .volumeLocalizedNameKey, .volumeUUIDStringKey, .volumeIsInternalKey,
         .volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsBrowsableKey,
         .volumeLocalizedFormatDescriptionKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
+        .volumeIsReadOnlyKey,
     ]
 
-    /// Alle eingehängten externen Laufwerke (Sticks, Festplatten, SD-Karten).
+    /// Alle eingehängten externen Laufwerke (Sticks, Festplatten, SD-Karten) – ohne schreibgeschützte
+    /// wie geöffnete Disk-Images (DMGs).
     static func externalVolumes() -> [VolumeInfo] {
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         return urls
+            .filter { (try? $0.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) != true }
             .compactMap(info(forVolume:))
             .filter(\.isExternal)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

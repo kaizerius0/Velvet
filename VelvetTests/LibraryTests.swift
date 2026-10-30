@@ -33,6 +33,7 @@ final class LibraryFilesTests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Rock"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Party"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("System Volume Information"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Velvet.app/Contents"), withIntermediateDirectories: true)
         for path in ["Rock/Toto - Africa.mp3", "Rock/Queen - Bohemian Rhapsody.mp3", "Party/Daft Punk - Get Lucky.mp4",
                      "Einzeln.mp3", "Rock/notizen.txt", "Rock/._Toto - Africa.mp3", ".DS_Store", "Rock/.DS_Store"] {
             try Data("x".utf8).write(to: root.appendingPathComponent(path))
@@ -117,10 +118,10 @@ final class HistoryAndDuplicateTests: XCTestCase {
     func testDuplicatesInLibraryAndHistory() async throws {
         let defaults = UserDefaults(suiteName: "velvet-library-tests-\(UUID().uuidString)")!
         let history = HistoryStore(fileURL: historyFile)
-        let library = LibraryViewModel(history: history, defaults: defaults)
-        library.use(folder: root)
+        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
         try await waitForScan(library)
-        XCTAssertEqual(library.tracks.count, 1)
+        XCTAssertEqual(library.tracks(in: LibrarySource.macID).count, 1)
+        XCTAssertEqual(library.locationText(for: root.appendingPathComponent("Rock/x.mp3")), "Mac › Rock")
 
         // Ein Video, das woanders auf dem Mac liegt (laut Verlauf).
         let elsewhere = FileManager.default.temporaryDirectory.appendingPathComponent("velvet-elsewhere-\(UUID().uuidString).mp3")
@@ -135,7 +136,8 @@ final class HistoryAndDuplicateTests: XCTestCase {
         https://youtu.be/dQw4w9WgXcQ
         Queen Bohemian Rhapsody
         """).entries
-        let hits = DuplicateChecker(library: library, history: history).hits(for: entries)
+        let checker = DuplicateChecker(library: library, history: history, sourceID: LibrarySource.macID)
+        let hits = checker.hits(for: entries)
 
         XCTAssertEqual(hits[0]?.strength, .exact)
         XCTAssertEqual(hits[0]?.inCurrentLibrary, true)
@@ -144,17 +146,49 @@ final class HistoryAndDuplicateTests: XCTestCase {
         XCTAssertEqual(hits[2]?.strength, .exact)
         XCTAssertEqual(hits[2]?.inCurrentLibrary, false)
         XCTAssertNil(hits[3])
+
+        // Einzelne Suchergebnisse: gleicher Titel in dieser Bibliothek → „Schon in …“
+        let candidate = VideoCandidate(id: "FTQbiNvZqaY", title: "Toto - Africa (Official HD Video)", channel: "TOTO", duration: 295,
+                                       viewCount: nil, thumbnailURL: nil, url: YouTubeLink.watchURL("FTQbiNvZqaY"))
+        XCTAssertEqual(checker.existingLocation(of: candidate), "Mac › Rock")
+        let other = VideoCandidate(id: "abcdefghijk", title: "Toto - Rosanna", channel: nil, duration: nil,
+                                   viewCount: nil, thumbnailURL: nil, url: YouTubeLink.watchURL("abcdefghijk"))
+        XCTAssertNil(checker.existingLocation(of: other))
     }
 
-    func testTargetSettingRoundTrip() {
-        for target in [AppSettings.Target.ask, .libraryRoot, .playlist("Auto: Sommer")] {
-            XCTAssertEqual(AppSettings.Target(rawValue: target.rawValue), target)
+    func testPlaylistOperationsAcrossLibraries() async throws {
+        let defaults = UserDefaults(suiteName: "velvet-library-tests-\(UUID().uuidString)")!
+        let history = HistoryStore(fileURL: historyFile)
+        let library = LibraryViewModel(history: history, defaults: defaults, macFolder: root)
+        try await waitForScan(library)
+
+        let party = try XCTUnwrap(library.createPlaylist(named: "Party", in: LibrarySource.macID))
+        try await waitForRevision(library, after: library.revision)
+        let africa = try XCTUnwrap(library.tracks(in: LibrarySource.macID).first)
+        let before = library.revision
+        library.move([africa], to: party)
+        try await waitForRevision(library, after: before)
+        XCTAssertEqual(library.tracks(in: LibrarySource.macID, playlistID: party.id).map(\.title), ["Toto - Africa (Official HD Video)"])
+
+        let rock = try XCTUnwrap(library.playlists(in: LibrarySource.macID).first { $0.name == "Rock" })
+        let moved = try XCTUnwrap(library.tracks(in: LibrarySource.macID, playlistID: party.id).first)
+        let beforeCopy = library.revision
+        library.copy([moved], to: rock)
+        try await waitForRevision(library, after: beforeCopy)
+        XCTAssertEqual(library.tracks(in: LibrarySource.macID).count, 2)
+    }
+
+    private func waitForRevision(_ library: LibraryViewModel, after revision: Int) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while library.revision <= revision || library.isScanning(LibrarySource.macID) {
+            if Date() > deadline { return XCTFail("Bibliothek wurde nicht neu eingelesen") }
+            try await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
     private func waitForScan(_ library: LibraryViewModel) async throws {
         let deadline = Date().addingTimeInterval(10)
-        while library.revision == 0 || library.isScanning {
+        while library.revision == 0 || library.isScanning(LibrarySource.macID) {
             if Date() > deadline { return XCTFail("Bibliothek wurde nicht eingelesen") }
             try await Task.sleep(nanoseconds: 50_000_000)
         }

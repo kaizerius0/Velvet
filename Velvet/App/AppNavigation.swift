@@ -1,29 +1,32 @@
 import Foundation
 
-/// Welcher Bereich gerade in der Seitenleiste gewählt ist.
+/// Was in der Seitenleiste gewählt ist – und Aufträge aus dem Menü an die Oberfläche.
 @MainActor
 final class AppNavigation: ObservableObject {
-    enum Section: String, Hashable, CaseIterable {
-        case downloads
-        case library
+    enum Item: Hashable {
+        /// Alle Titel einer Bibliothek (Mac oder Stick).
+        case allTracks(source: String)
+        /// Eine Playlist (Ordner) einer Bibliothek.
+        case playlist(source: String, id: String)
         case history
+    }
 
-        var title: String {
-            switch self {
-            case .downloads: return "Downloads"
-            case .library: return "Bibliothek"
-            case .history: return "Verlauf"
-            }
-        }
+    @Published var selection: Item? = .allTracks(source: LibrarySource.macID)
+    /// Menübefehle, die eine Ansicht öffnen soll.
+    /// Bibliothek, in der eine neue Playlist angelegt werden soll.
+    @Published var newPlaylistSource: String?
+    @Published var showAddSeveral = false
+    @Published var focusSearch = UUID()
 
-        var symbol: String {
-            switch self {
-            case .downloads: return "arrow.down.circle"
-            case .library: return "music.note.list"
-            case .history: return "clock.arrow.circlepath"
-            }
+    var sourceID: String? {
+        switch selection {
+        case let .allTracks(source), let .playlist(source, _): return source
+        case .history, .none: return nil
         }
     }
 
-    @Published var section: Section? = .downloads
+    var playlistID: String? {
+        if case let .playlist(_, id) = selection { return id }
+        return nil
+    }
 }

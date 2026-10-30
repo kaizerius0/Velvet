@@ -23,28 +23,18 @@ struct VolumeInfo: Identifiable, Hashable, Sendable {
     }
 }
 
-/// Der Ort, den Velvet als Bibliothek verwaltet – ein Stick oder ein Ordner auf dem Mac.
+/// Eine Bibliothek in der Seitenleiste: der Musikordner auf dem Mac oder ein eingesteckter Stick.
 /// Unterordner sind Playlists, die Audio- und Videodateien darin die Titel.
-struct LibraryLocation: Codable, Hashable, Sendable {
-    /// Zuletzt bekannter Pfad.
-    var path: String
-    /// Nur bei externen Laufwerken: findet den Stick wieder, auch wenn er unter anderem Pfad eingehängt wird.
-    var volumeUUID: String?
-    /// Pfad innerhalb des Laufwerks ("" = der ganze Stick).
-    var relativePath: String
-    var volumeName: String
-    var isExternal: Bool
-    var folderName: String
+struct LibrarySource: Identifiable, Hashable, Sendable {
+    static let macID = "mac"
 
-    /// „AUTO-STICK“ oder „AUTO-STICK › Musik“ bzw. der Ordnername auf dem Mac.
-    var displayName: String {
-        guard isExternal else { return folderName }
-        return relativePath.isEmpty ? volumeName : "\(volumeName) › \(relativePath)"
-    }
+    let id: String
+    let name: String
+    let rootURL: URL
+    /// Nur bei Sticks und externen Laufwerken.
+    let volume: VolumeInfo?
 
-    var shortName: String {
-        isExternal && relativePath.isEmpty ? volumeName : folderName
-    }
+    var isExternal: Bool { volume != nil }
 }
 
 /// Ein Ordner in der Bibliothek.

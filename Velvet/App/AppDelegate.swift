@@ -39,20 +39,3 @@ enum Dialogs {
         return alert.runModal() == .alertFirstButtonReturn
     }
 }
-
-enum FolderPicker {
-    /// Fragt bei jedem Lauf nach dem Zielordner.
-    @MainActor
-    static func chooseDestination(startingAt directory: URL?) -> URL? {
-        let panel = NSOpenPanel()
-        panel.title = "Zielordner wählen"
-        panel.message = "Wähle den Ordner, in dem die Downloads gespeichert werden sollen."
-        panel.prompt = "Hier speichern"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = directory ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-        return panel.runModal() == .OK ? panel.url : nil
-    }
-}

@@ -43,9 +43,8 @@ final class InputViewModel: ObservableObject {
 
     func chooseFile() {
         let panel = NSOpenPanel()
-        panel.title = "Liste laden"
-        panel.message = "Wähle eine oder mehrere Textdateien mit deiner Liste."
-        panel.prompt = "Laden"
+        panel.title = "Titel aus Datei hinzufügen"
+        panel.prompt = "Öffnen"
         panel.allowedContentTypes = TextFileLoader.contentTypes
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false

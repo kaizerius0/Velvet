@@ -9,7 +9,7 @@ struct SettingsView: View {
             ToolSettingsTab()
                 .tabItem { Label("Werkzeuge", systemImage: "wrench.and.screwdriver") }
         }
-        .frame(width: 560, height: 420)
+        .frame(width: 560, height: 460)
     }
 }
 
@@ -18,12 +18,21 @@ private struct DownloadSettingsTab: View {
 
     var body: some View {
         Form {
-            Section("Ablauf") {
+            Section("Qualität") {
+                Picker("Video (MP4)", selection: $settings.videoQuality) {
+                    ForEach(VideoQuality.allCases) { Text($0.title).tag($0) }
+                }
+                Picker("Audio (MP3)", selection: $settings.audioQuality) {
+                    ForEach(AudioQuality.allCases) { Text($0.title).tag($0) }
+                }
+            }
+
+            Section("Laden") {
                 Stepper(value: $settings.maxParallelDownloads, in: 1...4) {
                     Text("Gleichzeitige Downloads: \(settings.maxParallelDownloads)")
                 }
-                Toggle("Bestes Suchergebnis automatisch wählen", isOn: $settings.autoPickFirstResult)
-                Toggle("Bereits Geladenes überspringen (Archivdatei im Zielordner)", isOn: $settings.useArchive)
+                Toggle("Bei mehreren Titeln den ersten Treffer nehmen", isOn: $settings.autoPickFirstResult)
+                Toggle("Archivdatei im Ordner führen (archive.txt)", isOn: $settings.useArchive)
             }
 
             Section {
@@ -33,7 +42,7 @@ private struct DownloadSettingsTab: View {
             } header: {
                 Text("YouTube-Zugang")
             } footer: {
-                Text("Nur nötig für altersbeschränkte Videos oder wenn YouTube eine Bot-Prüfung verlangt. Du musst im gewählten Browser bei YouTube angemeldet sein. Safari benötigt dafür „Festplattenvollzugriff“ für Velvet (Systemeinstellungen → Datenschutz & Sicherheit).")
+                Text("Nur für altersbeschränkte Videos oder wenn YouTube eine Bot-Prüfung verlangt. Safari braucht dafür Festplattenvollzugriff.")
                     .foregroundStyle(.secondary)
             }
         }

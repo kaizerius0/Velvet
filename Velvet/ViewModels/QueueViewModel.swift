@@ -1,59 +1,34 @@
 import AppKit
 import Foundation
 
-/// Steuert einen Download-Lauf: Suchen, Auswahl, Warteschlange, parallele Downloads und Zusammenfassung.
+/// Die Warteschlange aller Titel, die gerade hinzugefügt werden – jeder mit seiner Ziel-Playlist.
+/// Suchen, Auswahl, parallele Downloads; fertige Titel verschwinden und stehen dann in der Bibliothek.
 @MainActor
 final class QueueViewModel: ObservableObject {
-    enum Filter: String, CaseIterable, Identifiable {
-        case all
-        case attention
-        case active
-        case problems
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .all: return "Alle"
-            case .attention: return "Auswahl nötig"
-            case .active: return "In Arbeit"
-            case .problems: return "Probleme"
-            }
-        }
-    }
-
-    struct Summary: Equatable {
-        var total = 0
-        var completed = 0
-        var skipped = 0
-        var failed = 0
-        var cancelled = 0
-        var ignored = 0
-        var needsAttention = 0
+    struct Activity: Equatable {
         var searching = 0
-        var transferring = 0
         var waiting = 0
+        var transferring = 0
+        var needsAttention = 0
+        var problems = 0
 
-        var finished: Int { completed + skipped + failed + cancelled + ignored }
-        var active: Int { searching + transferring + waiting }
+        var busy: Int { searching + waiting + transferring }
+        var isEmpty: Bool { busy == 0 && needsAttention == 0 && problems == 0 }
     }
 
     @Published private(set) var items: [DownloadItem] = []
-    @Published private(set) var summary = Summary()
-    @Published private(set) var overallProgress: Double = 0
-    @Published private(set) var options: DownloadOptions?
-    @Published var filter: Filter = .all
+    @Published private(set) var activity = Activity()
 
     private let settings: AppSettings
     private let tools: ToolManager
     private let history: HistoryStore
     private let library: LibraryViewModel
-    private var manager: DownloadManager?
+    private var cachedManager: DownloadManager?
+    private var cachedPaths: ToolPaths?
     private var pendingSearches: [DownloadItem] = []
     private var activeSearchCount = 0
     private var activeDownloadCount = 0
     private var sleepActivity: NSObjectProtocol?
-    private var didAnnounceFinish = false
 
     private static let maxParallelSearches = 3
 
@@ -64,88 +39,87 @@ final class QueueViewModel: ObservableObject {
         self.library = library
     }
 
-    var hasRun: Bool { !items.isEmpty }
-    var isFinished: Bool { hasRun && summary.finished == summary.total }
     var hasBusyItems: Bool { items.contains { $0.status.isBusy } }
-    var destination: URL? { options?.destination }
 
-    var filteredItems: [DownloadItem] {
-        switch filter {
-        case .all: return items
-        case .attention: return items.filter { $0.status.needsAttention }
-        case .active: return items.filter { $0.status.isBusy }
-        case .problems: return items.filter { $0.status.isProblem }
+    /// Titel, die in diesen Ordner geladen werden.
+    func items(for folder: URL) -> [DownloadItem] {
+        let path = folder.standardizedFileURL.path
+        return items.filter { $0.destination.standardizedFileURL.path == path }
+    }
+
+    /// Titel, die irgendwo in diese Bibliothek geladen werden.
+    func items(within root: URL) -> [DownloadItem] {
+        let path = root.standardizedFileURL.path
+        return items.filter {
+            let destination = $0.destination.standardizedFileURL.path
+            return destination == path || destination.hasPrefix(path + "/")
         }
     }
 
-    func count(for filter: Filter) -> Int {
-        switch filter {
-        case .all: return summary.total
-        case .attention: return summary.needsAttention
-        case .active: return summary.active
-        case .problems: return summary.failed + summary.cancelled
+    func isWriting(to root: URL) -> Bool {
+        items(within: root).contains { $0.status.isBusy }
+    }
+
+    private var manager: DownloadManager? {
+        guard let paths = tools.paths else { return nil }
+        if paths != cachedPaths {
+            cachedManager = DownloadManager(tools: paths)
+            cachedPaths = paths
         }
+        return cachedManager
     }
 
-    var failedItems: [DownloadItem] {
-        items.filter { if case .failed = $0.status { return true } else { return false } }
-    }
+    // MARK: - Hinzufügen
 
-    // MARK: - Start
-
-    /// - Parameter existing: Einträge, die schon in der Bibliothek liegen (Eintrags-ID → Ort) – sie werden übersprungen.
-    func start(entries: [ParsedEntry], destination: URL, existing: [Int: String] = [:]) {
-        guard let paths = tools.paths, !entries.isEmpty else { return }
-        reset()
-        manager = DownloadManager(tools: paths)
-        let options = settings.downloadOptions(destination: destination)
-        self.options = options
-        settings.lastDestinationPath = destination.path
-        // Reste eines abgebrochenen Laufs in diesem Ordner (halbe Dateien) entfernen.
-        try? FileManager.default.removeItem(at: options.tempDirectory)
-
-        items = entries.enumerated().map { DownloadItem(entry: $1, number: $0 + 1) }
-        for (entry, item) in zip(entries, items) {
-            if let location = existing[entry.id] {
-                item.status = .skipped(.inLibrary(location))
-                continue
-            }
-            switch item.origin {
-            case .search:
-                enqueueSearch(item)
-            case .link:
-                guard let url = item.sourceURL else { continue }
-                if YouTubeLink.isChannel(url) {
-                    item.status = .failed("Kanal-Links werden nicht unterstützt – bitte einzelne Videos oder Playlists einfügen.")
-                } else if YouTubeLink.isPlaylist(url) {
-                    resolvePlaylist(item)
-                } else {
-                    item.status = .waiting
-                }
-            }
+    /// Titel und Links aus einer Eingabe – Links laden sofort, Titel werden gesucht.
+    func add(entries: [ParsedEntry], to folder: URL) {
+        guard !entries.isEmpty else { return }
+        let options = prepare(folder)
+        for entry in entries {
+            let item = DownloadItem(entry: entry, destination: folder, options: options)
+            items.append(item)
+            begin(item)
         }
         pumpSearches()
         pumpDownloads()
         refresh()
     }
 
-    /// Beendet alles und kehrt zur Eingabe zurück. Bereits geladene Dateien bleiben erhalten.
-    func reset() {
-        for item in items {
-            stopWork(of: item)
-            if !item.status.isTerminal { item.status = .cancelled }
-        }
-        cleanUpTemporaryFiles()
-        items = []
-        pendingSearches = []
-        options = nil
-        manager = nil
-        filter = .all
-        didAnnounceFinish = false
+    /// Ein schon gewähltes Video (z. B. aus den Vorschlägen unter dem Suchfeld).
+    func add(candidate: VideoCandidate, query: String?, to folder: URL) {
+        let item = DownloadItem(candidate: candidate, query: query, destination: folder, options: prepare(folder))
+        items.append(item)
+        pumpDownloads()
         refresh()
     }
 
-    // MARK: - Nutzeraktionen
+    private func prepare(_ folder: URL) -> DownloadOptions {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let options = settings.downloadOptions(destination: folder)
+        // Reste eines abgebrochenen Downloads in diesem Ordner (halbe Dateien) entfernen.
+        if !items(for: folder).contains(where: { $0.status.isBusy }) {
+            try? FileManager.default.removeItem(at: options.tempDirectory)
+        }
+        return options
+    }
+
+    private func begin(_ item: DownloadItem) {
+        switch item.origin {
+        case .search:
+            enqueueSearch(item)
+        case .link:
+            guard let url = item.sourceURL else { return }
+            if YouTubeLink.isChannel(url) {
+                item.status = .failed("Kanal-Links werden nicht unterstützt.")
+            } else if YouTubeLink.isPlaylist(url) {
+                resolvePlaylist(item)
+            } else {
+                item.status = .waiting
+            }
+        }
+    }
+
+    // MARK: - Aktionen
 
     func choose(_ candidate: VideoCandidate, for item: DownloadItem) {
         stopWork(of: item)
@@ -167,7 +141,7 @@ final class QueueViewModel: ObservableObject {
         queueDownload(item)
     }
 
-    /// Lädt die nächsten fünf Treffer (beim ersten Mal für Links: Suche nach dem Videotitel).
+    /// Fünf neue Vorschläge (beim ersten Mal für Links: Suche nach dem Videotitel).
     func showMoreSuggestions(for item: DownloadItem) {
         guard item.canSuggest else { return }
         stopWork(of: item)
@@ -192,21 +166,8 @@ final class QueueViewModel: ObservableObject {
         refresh()
     }
 
-    func skip(_ item: DownloadItem) {
-        stopWork(of: item)
-        item.status = .ignored
-        refresh()
-    }
-
-    func cancel(_ item: DownloadItem) {
-        stopWork(of: item)
-        item.status = .cancelled
-        refresh()
-    }
-
     func retry(_ item: DownloadItem) {
         stopWork(of: item)
-        // Mit Link (direkt, gewählt oder manuell) erneut laden, sonst erneut suchen.
         if let url = item.sourceURL {
             if YouTubeLink.isPlaylist(url) {
                 resolvePlaylist(item)
@@ -219,7 +180,7 @@ final class QueueViewModel: ObservableObject {
         refresh()
     }
 
-    /// Lädt ein Video, obwohl es im Archiv oder in der Bibliothek schon vorhanden ist.
+    /// Lädt einen Titel, obwohl er im Archiv steht oder schon vorhanden ist.
     func forceDownload(_ item: DownloadItem) {
         stopWork(of: item)
         item.ignoreArchive = true
@@ -231,37 +192,25 @@ final class QueueViewModel: ObservableObject {
         refresh()
     }
 
-    func retryAllFailed() {
-        for item in failedItems { retry(item) }
-    }
-
-    func skipRemainingSelections() {
-        for item in items where item.status.needsAttention {
-            item.status = .ignored
-        }
+    /// Bricht ab und entfernt den Eintrag.
+    func remove(_ item: DownloadItem) {
+        stopWork(of: item)
+        items.removeAll { $0 === item }
+        cleanUpTemporaryFiles(in: item.destination)
         refresh()
     }
 
-    func cancelAll() {
-        for item in items where !item.status.isTerminal {
-            stopWork(of: item)
-            item.status = .cancelled
-        }
+    func removeAll() {
+        for item in items { stopWork(of: item) }
+        let folders = Set(items.map(\.destination))
+        items.removeAll()
         pendingSearches = []
+        folders.forEach { cleanUpTemporaryFiles(in: $0) }
         refresh()
     }
 
-    func openDestination() {
-        guard let destination else { return }
-        NSWorkspace.shared.open(destination)
-    }
-
-    func reveal(_ item: DownloadItem) {
-        guard let file = item.outputFile, FileManager.default.fileExists(atPath: file.path) else {
-            openDestination()
-            return
-        }
-        NSWorkspace.shared.activateFileViewerSelecting([file])
+    func retryAllProblems() {
+        for item in items where item.status.isProblem { retry(item) }
     }
 
     // MARK: - Suche
@@ -283,13 +232,16 @@ final class QueueViewModel: ObservableObject {
     }
 
     private func runSearch(_ item: DownloadItem) {
-        guard let manager else { return }
+        guard let manager else {
+            item.status = .failed("Die Werkzeuge sind noch nicht bereit.")
+            return
+        }
         let token = UUID()
         let query = item.query
         // Das bisher gewählte (falsche) Video und schon gezeigte Vorschläge nicht noch einmal anbieten.
         var excluded = item.seenCandidateIDs
         if let current = item.videoID { excluded.insert(current) }
-        let cookies = options?.cookieBrowser ?? .none
+        let cookies = item.options.cookieBrowser
         item.searchToken = token
         activeSearchCount += 1
 
@@ -339,7 +291,7 @@ final class QueueViewModel: ObservableObject {
     private func resolvePlaylist(_ item: DownloadItem) {
         guard let manager, let url = item.sourceURL else { return }
         let token = UUID()
-        let cookies = options?.cookieBrowser ?? .none
+        let cookies = item.options.cookieBrowser
         item.searchToken = token
         item.status = .resolvingPlaylist
 
@@ -369,9 +321,8 @@ final class QueueViewModel: ObservableObject {
     /// Ersetzt den Playlist-Eintrag durch die einzelnen Videos.
     private func expand(_ item: DownloadItem, into entries: [VideoCandidate]) {
         guard let index = items.firstIndex(where: { $0 === item }) else { return }
-        let children = entries.map { DownloadItem(candidate: $0, number: 0) }
+        let children = entries.map { DownloadItem(candidate: $0, query: nil, destination: item.destination, options: item.options) }
         items.replaceSubrange(index...index, with: children)
-        for (offset, entry) in items.enumerated() { entry.number = offset + 1 }
     }
 
     // MARK: - Downloads
@@ -393,10 +344,11 @@ final class QueueViewModel: ObservableObject {
     }
 
     private func startDownload(_ item: DownloadItem) {
-        guard let manager, var options, let url = item.sourceURL else {
-            item.status = .failed("Für diesen Eintrag gibt es keinen Link.")
+        guard let manager, let url = item.sourceURL else {
+            item.status = .failed(tools.paths == nil ? "Die Werkzeuge sind noch nicht bereit." : "Für diesen Titel gibt es keinen Link.")
             return
         }
+        var options = item.options
         if item.ignoreArchive { options.useArchive = false }
         item.ignoreArchive = false
 
@@ -455,7 +407,6 @@ final class QueueViewModel: ObservableObject {
             item.detail = nil
             item.progress = max(item.progress, YTDLPOutput.downloadShare)
         }
-        refreshProgress()
     }
 
     private func finishDownload(_ item: DownloadItem, _ outcome: Result<DownloadResult, Error>) {
@@ -478,6 +429,9 @@ final class QueueViewModel: ObservableObject {
                 file: file
             )
             replacePreviousFile(of: item)
+            library.refreshIfAffected(by: file)
+            cleanUpTemporaryFiles(in: item.destination)
+            removeLater(item)
         case let .success(.skipped(reason)):
             item.status = .skipped(reason)
             item.progress = 1
@@ -495,7 +449,17 @@ final class QueueViewModel: ObservableObject {
         }
     }
 
-    /// Wurde ein bereits geladenes Video durch ein anderes ersetzt, wandert die alte Datei in den Papierkorb.
+    /// Fertige Titel bleiben kurz als „Hinzugefügt“ stehen – bis die Bibliothek sie zeigt.
+    private func removeLater(_ item: DownloadItem) {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self, item.status == .completed else { return }
+            self.items.removeAll { $0 === item }
+            self.refresh()
+        }
+    }
+
+    /// Wurde ein bereits geladenes Video durch ein anderes ersetzt, wird die alte Datei gelöscht.
     private func rememberFileForReplacement(_ item: DownloadItem) {
         guard let file = item.outputFile else { return }
         item.replacedFile = file
@@ -510,13 +474,11 @@ final class QueueViewModel: ObservableObject {
         }
         guard let old = item.replacedFile, old != item.outputFile else { return }
         if FileManager.default.fileExists(atPath: old.path) {
-            // Auf Sticks endgültig löschen, auf dem Mac in den Papierkorb.
-            let permanently = VolumeService.volume(containing: old)?.isExternal ?? false
-            try? LibraryFiles.remove(old, permanently: permanently)
+            try? LibraryFiles.remove(old, permanently: library.deletesPermanently(at: old))
         }
         history.markRemoved(old, state: .replaced, note: item.outputFile.map { "Ersetzt durch „\($0.deletingPathExtension().lastPathComponent)“" })
-        if let oldID = item.replacedVideoID, oldID != item.videoID, let options, options.useArchive {
-            DownloadManager.removeFromArchive(videoID: oldID, archive: options.archiveURL)
+        if let oldID = item.replacedVideoID, oldID != item.videoID, item.options.useArchive {
+            DownloadManager.removeFromArchive(videoID: oldID, archive: item.options.archiveURL)
         }
     }
 
@@ -533,75 +495,43 @@ final class QueueViewModel: ObservableObject {
         item.phaseText = nil
     }
 
-    // MARK: - Zusammenfassung
+    // MARK: - Zustand
 
     private func refresh() {
-        var next = Summary()
-        next.total = items.count
+        var next = Activity()
         for item in items {
             switch item.status {
-            case .completed: next.completed += 1
-            case .skipped: next.skipped += 1
-            case .failed: next.failed += 1
-            case .cancelled: next.cancelled += 1
-            case .ignored: next.ignored += 1
-            case .needsSelection, .noResults: next.needsAttention += 1
             case .searching, .resolvingPlaylist: next.searching += 1
-            case .downloading, .processing: next.transferring += 1
             case .waiting: next.waiting += 1
+            case .downloading, .processing: next.transferring += 1
+            case .needsSelection, .noResults: next.needsAttention += 1
+            case .failed, .skipped: next.problems += 1
+            case .completed, .cancelled, .ignored: break
             }
         }
-        if next != summary { summary = next }
-        refreshProgress()
+        if next != activity { activity = next }
         updateSystemIntegration()
     }
 
-    private func refreshProgress() {
-        guard !items.isEmpty else {
-            overallProgress = 0
-            return
-        }
-        let done = items.reduce(0.0) { sum, item in
-            if item.status.isTerminal { return sum + 1 }
-            if item.status.isTransferring { return sum + item.progress }
-            return sum
-        }
-        let value = done / Double(items.count)
-        if abs(value - overallProgress) >= 0.002 || value == 1 || value == 0 {
-            overallProgress = value
-        }
-    }
-
-    /// Dock-Symbol, Ruhezustand und Hinweis, wenn alles fertig ist.
+    /// Dock-Symbol und Ruhezustand.
     private func updateSystemIntegration() {
-        NSApp?.dockTile.badgeLabel = summary.needsAttention > 0 ? "\(summary.needsAttention)" : nil
+        NSApp?.dockTile.badgeLabel = activity.needsAttention > 0 ? "\(activity.needsAttention)" : nil
 
-        let busy = hasBusyItems
+        let busy = activity.busy > 0
         if busy, sleepActivity == nil {
             sleepActivity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiated, .idleSystemSleepDisabled],
-                reason: "Velvet lädt Videos herunter"
+                reason: "Velvet lädt Titel herunter"
             )
         } else if !busy, let activity = sleepActivity {
             ProcessInfo.processInfo.endActivity(activity)
             sleepActivity = nil
         }
-
-        if isFinished {
-            if !didAnnounceFinish {
-                didAnnounceFinish = true
-                cleanUpTemporaryFiles()
-                if let destination { library.refreshIfAffected(by: destination) }
-                if NSApp?.isActive == false { NSApp?.requestUserAttention(.informationalRequest) }
-            }
-        } else {
-            didAnnounceFinish = false
-        }
     }
 
-    private func cleanUpTemporaryFiles() {
-        guard let temp = options?.tempDirectory, !hasBusyItems else { return }
-        try? FileManager.default.removeItem(at: temp)
+    private func cleanUpTemporaryFiles(in folder: URL) {
+        guard !items(for: folder).contains(where: { $0.status.isBusy }) else { return }
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent(".velvet-temp", isDirectory: true))
     }
 
     private static func message(for error: Error) -> String {

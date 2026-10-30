@@ -5,9 +5,7 @@ import SwiftUI
 struct HistoryScreen: View {
     @EnvironmentObject private var history: HistoryStore
     @EnvironmentObject private var library: LibraryViewModel
-    @EnvironmentObject private var input: InputViewModel
     @EnvironmentObject private var queue: QueueViewModel
-    @EnvironmentObject private var navigation: AppNavigation
 
     enum Filter: String, CaseIterable, Identifiable {
         case all, present, gone
@@ -61,7 +59,7 @@ struct HistoryScreen: View {
                     }
                     .width(min: 110, ideal: 140, max: 170)
                     TableColumn("Titel", value: \.title) { row in
-                        Text(row.title).help(row.entry.query.map { "Aus der Liste: „\($0)“" } ?? row.title)
+                        Text(row.title).help(row.entry.query.map { "Gesucht: „\($0)“" } ?? row.title)
                     }
                     TableColumn("Ort", value: \.location)
                         .width(min: 120, ideal: 200, max: 320)
@@ -92,7 +90,7 @@ struct HistoryScreen: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Verlauf").font(.title2.weight(.bold))
-                Text("\(Formatters.count(count, "Eintrag", "Einträge")) · was du wann wohin geladen hast")
+                Text(Formatters.count(count, "Eintrag", "Einträge"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -135,9 +133,7 @@ struct HistoryScreen: View {
         if rows.count == 1, let source = rows.first?.entry.sourceURL, let url = URL(string: source) {
             Button("Auf YouTube öffnen") { NSWorkspace.shared.open(url) }
         }
-        Button(rows.count == 1 ? "Erneut laden" : "\(rows.count) Einträge erneut laden") { reload(rows) }
-            .disabled(queue.hasRun)
-            .help(queue.hasRun ? "Erst den laufenden Download-Lauf beenden." : "")
+        Button(rows.count == 1 ? "Erneut hinzufügen" : "\(rows.count) Titel erneut hinzufügen") { reload(rows) }
         Divider()
         Button("Aus dem Verlauf entfernen", role: .destructive) {
             history.remove(Set(rows.map(\.id)))
@@ -145,12 +141,19 @@ struct HistoryScreen: View {
         }
     }
 
-    /// Setzt die Einträge unter „Downloads“ in die Liste.
+    /// Lädt die Titel erneut – in ihren alten Ordner, sonst in den Musikordner auf dem Mac.
     private func reload(_ rows: [Row]) {
-        let lines = rows.map { $0.entry.sourceURL ?? $0.entry.query ?? $0.entry.title }
-        let current = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        input.text = ([current].filter { !$0.isEmpty } + lines).joined(separator: "\n")
-        navigation.section = .downloads
+        for row in rows {
+            let entry = row.entry
+            let text = entry.sourceURL ?? entry.query ?? entry.title
+            guard let parsed = ListParser.parse(text).entries.first else { continue }
+            var folder = library.macFolder
+            if let original = history.resolvedURL(for: entry, volumes: library.volumes)?.deletingLastPathComponent(),
+               FileManager.default.fileExists(atPath: original.path) {
+                folder = original
+            }
+            queue.add(entries: [parsed], to: folder)
+        }
     }
 
     private var visibleRows: [Row] {
@@ -177,8 +180,8 @@ struct HistoryScreen: View {
             Image(systemName: "clock.arrow.circlepath")
                 .font(.system(size: 44))
                 .foregroundStyle(.tertiary)
-            Text("Noch nichts geladen").font(.headline)
-            Text("Alles, was du ab jetzt lädst, erscheint hier – mit Ort und Status.")
+            Text("Noch nichts geladen")
+                .font(.headline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
