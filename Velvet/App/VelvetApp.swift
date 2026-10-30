@@ -66,23 +66,17 @@ struct VelvetCommands: Commands {
             }
             .keyboardShortcut("n")
 
-            Button("Mehrere Titel hinzufügen …") {
-                navigation.showAddSeveral = true
+            Button("Titel hinzufügen") {
+                navigation.selection = .add
+                navigation.focusInput = UUID()
             }
             .keyboardShortcut("l")
 
             Button("Titel aus Datei hinzufügen …") {
+                navigation.selection = .add
                 input.chooseFile()
-                if !input.text.isEmpty { navigation.showAddSeveral = true }
             }
             .keyboardShortcut("o")
-        }
-        CommandGroup(after: .textEditing) {
-            Button("Titel suchen") {
-                if navigation.selection == .history { navigation.selection = .allTracks(source: LibrarySource.macID) }
-                navigation.focusSearch = UUID()
-            }
-            .keyboardShortcut("f")
         }
         CommandGroup(before: .sidebar) {
             Button("Verlauf") { navigation.selection = .history }

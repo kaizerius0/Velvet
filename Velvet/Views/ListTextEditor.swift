@@ -5,6 +5,8 @@ import SwiftUI
 struct ListTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isDropTargeted: Bool
+    /// Ändert sich der Wert, bekommt das Textfeld den Cursor.
+    var focusTrigger: UUID?
     var onFileDrop: (URL) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -48,6 +50,10 @@ struct ListTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
+        if let focusTrigger, focusTrigger != context.coordinator.lastFocusTrigger, let textView = scrollView.documentView {
+            context.coordinator.lastFocusTrigger = focusTrigger
+            DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+        }
         guard let textView = scrollView.documentView as? NSTextView, textView.string != text else { return }
         let selection = textView.selectedRanges
         textView.string = text
@@ -60,6 +66,7 @@ struct ListTextEditor: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ListTextEditor
+        var lastFocusTrigger: UUID?
 
         init(_ parent: ListTextEditor) {
             self.parent = parent

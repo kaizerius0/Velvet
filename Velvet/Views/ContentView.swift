@@ -12,9 +12,6 @@ struct ContentView: View {
             detail
         }
         .frame(minWidth: 980, minHeight: 640)
-        .sheet(isPresented: $navigation.showAddSeveral) {
-            AddSeveralSheet(sourceID: currentSourceID, playlistID: navigation.playlistID)
-        }
         .sheet(item: Binding(
             get: { navigation.newPlaylistSource.map(SheetID.init) },
             set: { navigation.newPlaylistSource = $0?.id }
@@ -26,7 +23,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: library.newlyMountedSourceID) { id in
-            if let id { navigation.selection = .allTracks(source: id) }
+            // Beim Hinzufügen nicht wegspringen.
+            if let id, navigation.selection != .add { navigation.selection = .allTracks(source: id) }
         }
         .onChange(of: library.sources) { sources in
             // Ausgeworfener Stick: zurück zum Mac.
@@ -47,6 +45,9 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch navigation.selection {
+        case .add, .none:
+            AddScreen()
+                .navigationTitle("Hinzufügen")
         case .history:
             HistoryScreen()
                 .navigationTitle("Verlauf")
@@ -56,13 +57,7 @@ struct ContentView: View {
         case let .allTracks(source):
             PlaylistScreen(sourceID: source, playlistID: nil)
                 .id(navigation.selection)
-        case .none:
-            PlaylistScreen(sourceID: LibrarySource.macID, playlistID: nil)
         }
-    }
-
-    private var currentSourceID: String {
-        navigation.sourceID ?? LibrarySource.macID
     }
 
     private struct SheetID: Identifiable {
@@ -81,6 +76,20 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: $navigation.selection) {
+            Section {
+                Label {
+                    HStack(spacing: 6) {
+                        Text("Hinzufügen")
+                        if queue.activity.busy > 0 {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "plus.circle")
+                }
+                .badge(queue.activity.needsAttention)
+                .tag(AppNavigation.Item.add)
+            }
             ForEach(library.sources) { source in
                 Section {
                     Label("Alle Titel", systemImage: "music.note")
@@ -104,7 +113,6 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
-                ActivityButton()
                 ToolStatusBadge()
                 #if DEBUG
                 Text("Entwicklungsversion")

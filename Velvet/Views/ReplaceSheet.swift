@@ -6,7 +6,6 @@ struct ReplaceSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var link = ""
 
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 12, alignment: .top), count: DownloadManager.searchPageSize)
     private let refinements = ["Extended", "Original Mix", "Live", "Remix", "Radio Edit", "Lyrics"]
 
     var body: some View {
@@ -19,7 +18,7 @@ struct ReplaceSheet: View {
                     Text("„\(model.track.title)“ austauschen")
                         .font(.title2.weight(.bold))
                         .lineLimit(1)
-                    Text("Liegt in \(model.locationText). Die neue Version kommt in denselben Ordner, die alte wird danach gelöscht.")
+                    Text("Ersetzt die Datei in \(model.locationText)")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -32,7 +31,6 @@ struct ReplaceSheet: View {
                     .disabled(model.isBusy)
             }
             HStack(spacing: 6) {
-                Text("Schnell:").font(.caption).foregroundStyle(.secondary)
                 ForEach(refinements, id: \.self) { word in
                     Button(word) { model.refine(with: word) }
                         .controlSize(.small)
@@ -41,18 +39,11 @@ struct ReplaceSheet: View {
             }
 
             content
-                .frame(minHeight: 230)
+                .frame(height: 232)
 
             Divider()
 
             HStack(spacing: 10) {
-                Button {
-                    model.loadSuggestions()
-                } label: {
-                    Label("Andere Vorschläge", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(model.isBusy)
-
                 TextField("Oder eigenen Link einfügen", text: $link)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 280)
@@ -89,15 +80,17 @@ struct ReplaceSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .noResults:
-            Text("Keine (weiteren) Treffer – ändere den Suchbegriff oder füge einen Link ein.")
+            Text("Keine Treffer")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .choosing:
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                ForEach(model.candidates) { candidate in
-                    CandidateCard(candidate: candidate) { model.choose(candidate) }
-                }
-            }
+            CandidateCarousel(
+                candidates: model.candidates,
+                isLoadingMore: model.isLoadingMore,
+                canLoadMore: model.hasMore,
+                onLoadMore: model.loadMore,
+                onSelect: model.choose
+            )
         case .downloading:
             VStack(alignment: .leading, spacing: 8) {
                 Text("Neue Version wird geladen …").font(.headline)

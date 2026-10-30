@@ -13,6 +13,8 @@ final class AppSettings: ObservableObject {
         static let cookieBrowser = "cookieBrowser"
         static let autoUpdateYtDlp = "autoUpdateYtDlp"
         static let skipExisting = "skipExisting"
+        static let addTargetSource = "addTargetSource"
+        static let addTargetPlaylist = "addTargetPlaylist"
     }
 
     private let defaults: UserDefaults
@@ -41,6 +43,13 @@ final class AppSettings: ObservableObject {
     @Published var autoUpdateYtDlp: Bool {
         didSet { defaults.set(autoUpdateYtDlp, forKey: Key.autoUpdateYtDlp) }
     }
+    /// Ziel für neue Titel: Bibliothek (Mac oder Stick-ID) und Playlist-Name („“ = Hauptordner).
+    @Published var addTargetSource: String {
+        didSet { defaults.set(addTargetSource, forKey: Key.addTargetSource) }
+    }
+    @Published var addTargetPlaylist: String {
+        didSet { defaults.set(addTargetPlaylist, forKey: Key.addTargetPlaylist) }
+    }
     /// Titel überspringen, die schon in der Bibliothek liegen.
     @Published var skipExisting: Bool {
         didSet { defaults.set(skipExisting, forKey: Key.skipExisting) }
@@ -64,6 +73,8 @@ final class AppSettings: ObservableObject {
         cookieBrowser = CookieBrowser(rawValue: defaults.string(forKey: Key.cookieBrowser) ?? "") ?? .none
         autoUpdateYtDlp = defaults.bool(forKey: Key.autoUpdateYtDlp)
         skipExisting = defaults.bool(forKey: Key.skipExisting)
+        addTargetSource = defaults.string(forKey: Key.addTargetSource) ?? LibrarySource.macID
+        addTargetPlaylist = defaults.string(forKey: Key.addTargetPlaylist) ?? ""
     }
 
     var qualityDescription: String {

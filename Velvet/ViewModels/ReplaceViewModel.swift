@@ -19,6 +19,8 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
 
     @Published var query: String
     @Published private(set) var candidates: [VideoCandidate] = []
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMore = true
     @Published private(set) var phase: Phase = .searching
     @Published private(set) var progress: Double = 0
     @Published private(set) var detail: String?
@@ -46,6 +48,8 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
 
     func search() {
         seen = []
+        candidates = []
+        hasMore = true
         loadSuggestions()
     }
 
@@ -58,7 +62,7 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
         search()
     }
 
-    func loadSuggestions() {
+    private func loadSuggestions() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         task?.cancel()
@@ -71,11 +75,31 @@ final class ReplaceViewModel: ObservableObject, Identifiable {
                 guard let self, !Task.isCancelled else { return }
                 self.candidates = results
                 self.seen.formUnion(results.map(\.id))
+                self.hasMore = !results.isEmpty
                 self.phase = results.isEmpty ? .noResults : .choosing
             } catch {
                 guard let self, !(error is CancellationError) else { return }
                 self.phase = .failed((error as? DownloadFailure)?.message ?? error.localizedDescription)
             }
+        }
+    }
+
+    /// Hängt beim seitlichen Wischen fünf weitere Versionen an.
+    func loadMore() {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isLoadingMore, hasMore, phase == .choosing else { return }
+        isLoadingMore = true
+        let excluded = seen
+        let cookies = settings.cookieBrowser
+        Task { [weak self, manager] in
+            let results = try? await manager.search(text, excluding: excluded, cookies: cookies)
+            guard let self else { return }
+            self.isLoadingMore = false
+            guard let results, self.phase == .choosing else { return }
+            let fresh = results.filter { !self.seen.contains($0.id) }
+            self.candidates += fresh
+            self.seen.formUnion(fresh.map(\.id))
+            if fresh.isEmpty { self.hasMore = false }
         }
     }
 

@@ -4,6 +4,8 @@ import SwiftUI
 /// Eine Vorschlagskarte mit Vorschaubild, Titel, Kanal, Dauer und Aufrufen.
 struct CandidateCard: View {
     let candidate: VideoCandidate
+    /// „AUTO-STICK › Rock“, wenn der Titel dort schon liegt.
+    var existing: String?
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -28,15 +30,19 @@ struct CandidateCard: View {
                     .font(.callout.weight(.medium))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
 
                 Text(candidate.channel ?? "Unbekannter Kanal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                if let views = candidate.viewCountText {
+                if let existing {
+                    Label("Schon in \(existing)", systemImage: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                } else if let views = candidate.viewCountText {
                     Text(views)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -72,7 +78,7 @@ struct CandidateCard: View {
                 .padding(14)
             }
         }
-        .help("Klicken, um „\(candidate.title)“ zu laden")
+        .help(candidate.title)
         .contextMenu {
             Button("Dieses Video laden", action: onSelect)
             Button("Im Browser ansehen") { NSWorkspace.shared.open(candidate.url) }
@@ -84,137 +90,98 @@ struct CandidateCard: View {
     }
 }
 
-/// Ein Suchergebnis unter dem Suchfeld: Vorschaubild, Titel, Kanal – und „+“ zum Hinzufügen.
-struct SuggestionRow: View {
-    let candidate: VideoCandidate
-    /// „Rock“, wenn der Titel dort schon liegt.
-    let existing: String?
-    let isAdded: Bool
-    let onAdd: () -> Void
+/// Vorschläge zum seitlichen Durchwischen: am Ende werden automatisch weitere geladen,
+/// die bisherigen bleiben – man kann jederzeit zurückwischen.
+struct CandidateCarousel: View {
+    let candidates: [VideoCandidate]
+    let isLoadingMore: Bool
+    let canLoadMore: Bool
+    var existing: (VideoCandidate) -> String? = { _ in nil }
+    let onLoadMore: () -> Void
+    let onSelect: (VideoCandidate) -> Void
 
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Thumbnail(url: candidate.thumbnailURL, cornerRadius: 4)
-                .frame(width: 72)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.title)
-                    .lineLimit(1)
-                Text(details)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if let existing {
-                    Label("Schon in \(existing)", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-            }
-            Spacer(minLength: 12)
-            Button {
-                NSWorkspace.shared.open(candidate.url)
-            } label: {
-                Image(systemName: "play.rectangle")
-            }
-            .buttonStyle(.borderless)
-            .help("Im Browser ansehen")
-            .opacity(isHovering ? 1 : 0)
-
-            if isAdded {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.green)
-                    .help("Hinzugefügt")
-            } else {
-                Button(action: onAdd) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(Color.accentColor)
-                .help("Hinzufügen")
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(isHovering ? Color.primary.opacity(0.05) : Color.clear)
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .onTapGesture(count: 2) { if !isAdded { onAdd() } }
-    }
-
-    private var details: String {
-        [candidate.channel, candidate.durationText, candidate.viewCountText].compactMap { $0 }.joined(separator: " · ")
-    }
-}
-
-/// Auswahl für einen Titel, bei dem Velvet nicht sicher ist: fünf Vorschläge, Suche anpassen oder eigenen Link.
-struct CandidateChooser: View {
-    @ObservedObject var item: DownloadItem
-    let queue: QueueViewModel
-    let onDone: () -> Void
-
-    @State private var query = ""
-    @State private var link = ""
-
-    private let columns = Array(repeating: GridItem(.flexible(minimum: 120), spacing: 12, alignment: .top), count: DownloadManager.searchPageSize)
+    static let cardWidth: CGFloat = 196
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                TextField("Suchbegriff", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(search)
-                Button("Suchen", action: search)
-            }
-
-            Group {
-                switch item.status {
-                case .searching:
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                case .noResults:
-                    Text("Keine Treffer")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                default:
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                        ForEach(item.candidates) { candidate in
-                            CandidateCard(candidate: candidate) {
-                                queue.choose(candidate, for: item)
-                                onDone()
+        ScrollViewReader { proxy in
+            ZStack {
+                ScrollView(.horizontal, showsIndicators: true) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
+                            CandidateCard(candidate: candidate, existing: existing(candidate)) {
+                                onSelect(candidate)
+                            }
+                            .frame(width: Self.cardWidth)
+                            .id(candidate.id)
+                            .onAppear {
+                                // Kurz vor dem Ende schon die nächsten fünf holen.
+                                if index >= candidates.count - 2 { onLoadMore() }
                             }
                         }
+                        trailing
                     }
+                    .padding(.horizontal, 2)
+                    .padding(.bottom, 12)
                 }
-            }
 
-            HStack(spacing: 8) {
-                Button("Weitere Vorschläge") { queue.showMoreSuggestions(for: item) }
-                    .disabled(item.status == .searching)
-                Spacer()
-                TextField("YouTube-Link", text: $link)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 260)
-                    .onSubmit(useLink)
-                Button("Laden", action: useLink)
-                    .disabled(ListParser.link(from: link) == nil)
+                // Pfeile mittig auf Höhe der Vorschaubilder – für die Maus; mit dem Trackpad einfach wischen.
+                HStack {
+                    pageButton("chevron.left") { scroll(proxy, by: -4) }
+                    Spacer()
+                    pageButton("chevron.right") { scroll(proxy, by: 4) }
+                }
+                .padding(.horizontal, -8)
+                .padding(.top, (Self.cardWidth - 16) * 9 / 32 - 6)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
         }
-        .padding(16)
-        .frame(width: 860)
-        .onAppear { query = item.query }
     }
 
-    private func search() {
-        queue.search(item, for: query)
+    @State private var leadingIndex = 0
+
+    @ViewBuilder
+    private var trailing: some View {
+        if isLoadingMore {
+            VStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Weitere Vorschläge …")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 140, height: 160)
+        } else if canLoadMore {
+            Button(action: onLoadMore) {
+                Label("Mehr", systemImage: "arrow.right.circle")
+            }
+            .buttonStyle(.borderless)
+            .frame(width: 100, height: 160)
+        } else if !candidates.isEmpty {
+            Text("Keine weiteren Treffer")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 140, height: 160)
+        }
     }
 
-    private func useLink() {
-        guard let url = ListParser.link(from: link), !YouTubeLink.isPlaylist(url), !YouTubeLink.isChannel(url) else { return }
-        queue.useLink(url, for: item)
-        onDone()
+    private func pageButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(.regularMaterial))
+                .overlay(Circle().strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Für die Maus: vier Karten weiter bzw. zurück.
+    private func scroll(_ proxy: ScrollViewProxy, by step: Int) {
+        guard !candidates.isEmpty else { return }
+        let target = min(max(leadingIndex + step, 0), candidates.count - 1)
+        if step > 0, target >= candidates.count - 2 { onLoadMore() }
+        leadingIndex = target
+        withAnimation(.easeInOut(duration: 0.3)) {
+            proxy.scrollTo(candidates[target].id, anchor: .leading)
+        }
     }
 }

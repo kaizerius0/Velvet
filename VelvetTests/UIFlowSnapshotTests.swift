@@ -64,41 +64,45 @@ final class UIFlowSnapshotTests: XCTestCase {
                 .background(Color(nsColor: .windowBackgroundColor))
         }
 
-        // 1. Einen einzelnen Titel suchen – der schon vorhandene wird markiert.
-        let quickAdd = QuickAddModel()
-        quickAdd.text = "toto africa"
-        quickAdd.search("toto africa", tools: paths, cookies: .none)
-        try await waitUntil("Suchergebnisse") { quickAdd.phase == .results }
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id, quickAdd: quickAdd)), "1-suchen", dark: false)
-
-        // 2. Einen Titel per „+“ hinzufügen – er erscheint oben in der Playlist und lädt.
-        quickAdd.search("me at the zoo jawed", tools: paths, cookies: .none)
-        try await waitUntil("Zoo-Suche") { quickAdd.phase == .results }
-        let zoo = try XCTUnwrap(quickAdd.results.first { $0.id == "jNQXAC9IVRw" } ?? quickAdd.results.first)
-        queue.add(candidate: zoo, query: "me at the zoo jawed", to: rock.url)
-        quickAdd.markAdded(zoo)
-        try await waitUntil("Download läuft") { queue.items.first.map { $0.status.isTransferring || $0.status == .completed } ?? false }
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id, quickAdd: quickAdd)), "2-hinzufuegen", dark: false)
-        try await waitUntil("Titel in Rock", timeout: 180) {
-            queue.items.isEmpty && library.tracks(in: mac, playlistID: rock.id).contains { $0.title.contains("zoo") }
-        }
-
-        // 3. Mehrere Titel: einer braucht eine Auswahl, der Link lädt direkt.
-        input.text = "Me at the zoo\nhttps://youtu.be/jNQXAC9IVRw"
+        // 1. Hinzufügen: ein Titel zum Auswählen und ein Link, Ziel „Rock“
+        settings.addTargetSource = mac
+        settings.addTargetPlaylist = "Rock"
+        navigation.selection = .add
+        input.text = "Toto Africa Extended\nMe at the zoo\nhttps://youtu.be/jNQXAC9IVRw"
         let entries = input.parseNow().entries
-        try await snapshot(environment(AddSeveralSheet(sourceID: mac, playlistID: party.id)), "3-mehrere-titel", dark: false, size: CGSize(width: 880, height: 470))
-        queue.add(entries: entries, to: party.url)
-        try await waitUntil("Auswahl nötig") { queue.activity.needsAttention == 1 }
-        navigation.selection = .playlist(source: mac, id: party.id)
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: party.id)), "4-auswahl", dark: true)
-        let choice = try XCTUnwrap(queue.items.first { $0.status == .needsSelection })
-        queue.choose(try XCTUnwrap(choice.candidates.first { $0.id == "jNQXAC9IVRw" } ?? choice.candidates.first), for: choice)
-        try await waitUntil("Alles geladen", timeout: 240) { queue.items.isEmpty && !library.isScanning(mac) }
-        XCTAssertEqual(history.entries.filter { $0.state == .downloaded }.count, 2, "Gleiche Datei in Party zählt einmal")
+        XCTAssertEqual(entries.count, 3)
+        try await snapshot(environment(AddScreen()), "1-eingabe", dark: false)
 
-        // 4. Eine Playlist im Alltag (hell und dunkel)
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id)), "5-playlist", dark: false)
-        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: nil)), "5-alle-titel-dunkel", dark: true)
+        queue.add(entries: Array(entries.dropFirst()), to: rock.url)
+        input.clear()
+        try await waitUntil("Auswahl nötig") { queue.activity.needsAttention == 1 }
+        let choice = try XCTUnwrap(queue.items.first { $0.status == .needsSelection })
+        XCTAssertEqual(choice.candidates.count, 5)
+
+        // 2. Zur Seite wischen: fünf weitere werden angehängt, die ersten bleiben (zurückwischen geht).
+        let firstFive = choice.candidates.map(\.id)
+        queue.loadMoreCandidates(for: choice)
+        try await waitUntil("Weitere Vorschläge") { !choice.isLoadingMore && choice.candidates.count >= 10 }
+        XCTAssertEqual(Array(choice.candidates.prefix(5)).map(\.id), firstFive)
+        XCTAssertEqual(Set(choice.candidates.map(\.id)).count, choice.candidates.count, "keine doppelten Vorschläge")
+        try await snapshot(environment(AddScreen()), "2-auswahl", dark: false)
+        try await snapshot(environment(AddScreen()), "2-auswahl-dunkel", dark: true)
+
+        queue.choose(try XCTUnwrap(choice.candidates.first { $0.id == "jNQXAC9IVRw" } ?? choice.candidates.first), for: choice)
+        try await waitUntil("Alles geladen", timeout: 240) {
+            queue.items.allSatisfy { $0.status == .completed } && !library.isScanning(mac)
+        }
+        XCTAssertEqual(queue.activity.completed, 2)
+        XCTAssertEqual(history.entries.filter { $0.state == .downloaded }.count, 1, "Gleiche Datei in Rock zählt einmal")
+        try await snapshot(environment(AddScreen()), "3-fertig", dark: false)
+        queue.clearFinished()
+        XCTAssertTrue(queue.items.isEmpty)
+
+        // 3. Die Playlist im Alltag (hell und dunkel)
+        try await waitUntil("Titel in Rock") { library.tracks(in: mac, playlistID: rock.id).contains { $0.title.contains("zoo") } }
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: rock.id)), "4-playlist", dark: false)
+        try await snapshot(environment(PlaylistScreen(sourceID: mac, playlistID: nil)), "4-alle-titel-dunkel", dark: true)
+        XCTAssertNotNil(party)
 
         // 5. Andere Version: den Titel in Rock austauschen
         let downloaded = try XCTUnwrap(library.tracks(in: mac, playlistID: rock.id).first { $0.title.contains("zoo") })
@@ -113,8 +117,8 @@ final class UIFlowSnapshotTests: XCTestCase {
         XCTAssertTrue(history.entries.contains { $0.state == .replaced })
 
         // 6. Verlauf und Seitenleiste
-        try await snapshot(environment(HistoryScreen()), "6-verlauf", dark: false)
-        try await snapshot(environment(Sidebar()), "7-seitenleiste", dark: false, size: CGSize(width: 250, height: 640))
+        try await snapshot(environment(HistoryScreen()), "5-verlauf", dark: false)
+        try await snapshot(environment(Sidebar()), "6-seitenleiste", dark: false, size: CGSize(width: 250, height: 640))
     }
 
     // MARK: Hilfen
@@ -127,7 +131,7 @@ final class UIFlowSnapshotTests: XCTestCase {
         }
     }
 
-    private func snapshot<V: View>(_ view: V, _ name: String, dark: Bool, size: CGSize = CGSize(width: 1000, height: 760)) async throws {
+    private func snapshot<V: View>(_ view: V, _ name: String, dark: Bool, size: CGSize = CGSize(width: 1040, height: 900)) async throws {
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: hosting.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)

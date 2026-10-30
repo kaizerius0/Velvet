@@ -11,6 +11,7 @@ final class QueueViewModel: ObservableObject {
         var transferring = 0
         var needsAttention = 0
         var problems = 0
+        var completed = 0
 
         var busy: Int { searching + waiting + transferring }
         var isEmpty: Bool { busy == 0 && needsAttention == 0 && problems == 0 }
@@ -45,6 +46,17 @@ final class QueueViewModel: ObservableObject {
     func items(for folder: URL) -> [DownloadItem] {
         let path = folder.standardizedFileURL.path
         return items.filter { $0.destination.standardizedFileURL.path == path }
+    }
+
+    /// Anteil erledigter Titel – für den Fortschrittsbalken.
+    var overallProgress: Double {
+        guard !items.isEmpty else { return 0 }
+        let done = items.reduce(0.0) { sum, item in
+            if item.status.isTerminal { return sum + 1 }
+            if item.status.isTransferring { return sum + item.progress }
+            return sum
+        }
+        return done / Double(items.count)
     }
 
     /// Titel, die irgendwo in diese Bibliothek geladen werden.
@@ -200,6 +212,17 @@ final class QueueViewModel: ObservableObject {
         refresh()
     }
 
+    /// Fertige, übersprungene und abgebrochene Titel ausblenden – Fehler bleiben stehen.
+    func clearFinished() {
+        items.removeAll { item in
+            switch item.status {
+            case .completed, .skipped, .cancelled, .ignored: return true
+            default: return false
+            }
+        }
+        refresh()
+    }
+
     func removeAll() {
         for item in items { stopWork(of: item) }
         let folders = Set(items.map(\.destination))
@@ -211,6 +234,37 @@ final class QueueViewModel: ObservableObject {
 
     func retryAllProblems() {
         for item in items where item.status.isProblem { retry(item) }
+    }
+
+    // MARK: - Weitere Vorschläge (seitlich wischen)
+
+    /// Hängt fünf weitere Vorschläge an – die bisherigen bleiben, man kann zurückwischen.
+    func loadMoreCandidates(for item: DownloadItem) {
+        guard !item.isLoadingMore, item.hasMoreCandidates, item.status == .needsSelection, let manager else { return }
+        var excluded = item.seenCandidateIDs
+        if let current = item.videoID { excluded.insert(current) }
+        let query = item.query
+        let cookies = item.options.cookieBrowser
+        let token = UUID()
+        item.moreToken = token
+        item.isLoadingMore = true
+
+        Task {
+            let results: [VideoCandidate]?
+            do {
+                results = try await manager.search(query, excluding: excluded, cookies: cookies)
+            } catch {
+                results = nil
+            }
+            guard item.moreToken == token else { return }
+            item.isLoadingMore = false
+            item.moreToken = nil
+            guard let results else { return }
+            let fresh = results.filter { !item.seenCandidateIDs.contains($0.id) }
+            item.candidates += fresh
+            item.seenCandidateIDs.formUnion(fresh.map(\.id))
+            if fresh.isEmpty { item.hasMoreCandidates = false }
+        }
     }
 
     // MARK: - Suche
@@ -271,6 +325,7 @@ final class QueueViewModel: ObservableObject {
         case let .success(fresh):
             item.hasSearched = true
             item.candidates = fresh
+            item.hasMoreCandidates = !fresh.isEmpty
             item.seenCandidateIDs.formUnion(fresh.map(\.id))
             if fresh.isEmpty {
                 item.status = .noResults
@@ -431,7 +486,6 @@ final class QueueViewModel: ObservableObject {
             replacePreviousFile(of: item)
             library.refreshIfAffected(by: file)
             cleanUpTemporaryFiles(in: item.destination)
-            removeLater(item)
         case let .success(.skipped(reason)):
             item.status = .skipped(reason)
             item.progress = 1
@@ -446,16 +500,6 @@ final class QueueViewModel: ObservableObject {
             } else {
                 item.status = .failed(Self.message(for: error))
             }
-        }
-    }
-
-    /// Fertige Titel bleiben kurz als „Hinzugefügt“ stehen – bis die Bibliothek sie zeigt.
-    private func removeLater(_ item: DownloadItem) {
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard let self, item.status == .completed else { return }
-            self.items.removeAll { $0 === item }
-            self.refresh()
         }
     }
 
@@ -486,6 +530,8 @@ final class QueueViewModel: ObservableObject {
     private func stopWork(of item: DownloadItem) {
         item.searchToken = nil
         item.downloadToken = nil
+        item.moreToken = nil
+        item.isLoadingMore = false
         item.searchTask?.cancel()
         item.downloadTask?.cancel()
         item.searchTask = nil
@@ -506,7 +552,8 @@ final class QueueViewModel: ObservableObject {
             case .downloading, .processing: next.transferring += 1
             case .needsSelection, .noResults: next.needsAttention += 1
             case .failed, .skipped: next.problems += 1
-            case .completed, .cancelled, .ignored: break
+            case .completed: next.completed += 1
+            case .cancelled, .ignored: break
             }
         }
         if next != activity { activity = next }

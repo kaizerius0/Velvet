@@ -1,7 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Eine Playlist (oder alle Titel einer Bibliothek): oben suchen und hinzufügen, darunter die Titel.
+/// Eine Playlist (oder alle Titel einer Bibliothek) – die Titel verwalten.
+/// Neue Titel kommen über „Titel hinzufügen“ in den Bereich „Hinzufügen“.
 struct PlaylistScreen: View {
     let sourceID: String
     /// `nil` = alle Titel der Bibliothek.
@@ -15,23 +16,13 @@ struct PlaylistScreen: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var input: InputViewModel
 
-    @StateObject private var quickAdd: QuickAddModel
-    @FocusState private var searchFocused: Bool
     @State private var selection = Set<Track.ID>()
     @State private var filter = ""
     @State private var sortOrder = [KeyPathComparator(\Track.added, order: .reverse)]
     @State private var renameTrack: Track?
     @State private var pendingDeletion: [Track] = []
     @State private var replaceModel: ReplaceViewModel?
-    /// In „Alle Titel“: wohin neue Titel kommen (`nil` = Hauptordner).
-    @State private var targetPlaylistName: String?
     @State private var isDropTargeted = false
-
-    init(sourceID: String, playlistID: String?, quickAdd: QuickAddModel? = nil) {
-        self.sourceID = sourceID
-        self.playlistID = playlistID
-        _quickAdd = StateObject(wrappedValue: quickAdd ?? QuickAddModel())
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,9 +31,8 @@ struct PlaylistScreen: View {
                     .padding([.horizontal, .top], 20)
             }
             header
-            addField
-            if quickAdd.isOpen {
-                suggestions
+            if !incoming.isEmpty {
+                incomingBanner
             }
             Divider()
             content
@@ -76,8 +66,6 @@ struct PlaylistScreen: View {
                  ? "Wird endgültig vom Stick gelöscht."
                  : "Kommt in den Papierkorb.")
         }
-        .onChange(of: navigation.focusSearch) { _ in searchFocused = true }
-        .onAppear { searchFocused = true }
     }
 
     // MARK: Kopf
@@ -118,25 +106,24 @@ struct PlaylistScreen: View {
                     .foregroundStyle(.green)
                     .lineLimit(1)
             }
-            Picker("Format", selection: $settings.format) {
-                Text("MP3").tag(MediaFormat.audio)
-                Text("MP4").tag(MediaFormat.video)
+            if library.tracks(in: sourceID, playlistID: playlistID).count > 12 {
+                TextField("Filtern", text: $filter)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Format für neue Titel")
+            Button(action: openAdd) {
+                Label("Titel hinzufügen", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
             moreMenu
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
-        .padding(.bottom, 12)
+        .padding(.bottom, 14)
     }
 
     private var moreMenu: some View {
         Menu {
-            Button("Mehrere Titel hinzufügen …") { navigation.showAddSeveral = true }
-            Divider()
             if let playlist {
                 Button("Im Finder zeigen") { library.reveal([playlist.url]) }
             } else {
@@ -160,164 +147,12 @@ struct PlaylistScreen: View {
 
     // MARK: Hinzufügen
 
-    private var addField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Titel oder YouTube-Link hinzufügen", text: $quickAdd.text)
-                .textFieldStyle(.plain)
-                .font(.title3)
-                .focused($searchFocused)
-                .onSubmit(submit)
-                .onExitCommand { quickAdd.close() }
-            if !quickAdd.text.isEmpty {
-                Button {
-                    quickAdd.text = ""
-                    quickAdd.close()
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.borderless)
-            }
-            if playlistID == nil {
-                targetMenu
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color(nsColor: .textBackgroundColor)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(searchFocused ? Color.accentColor.opacity(0.6) : Theme.border, lineWidth: searchFocused ? 2 : 1)
-        )
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
-        .onChange(of: quickAdd.text) { text in
-            // Mehrere Zeilen eingefügt: das ist eine Liste.
-            if text.contains("\n") {
-                openAddSeveral(with: text)
-                quickAdd.text = ""
-            }
-        }
-    }
-
-    /// In „Alle Titel“: Ziel-Playlist für neue Titel.
-    private var targetMenu: some View {
-        Menu {
-            Button("Hauptordner") { targetPlaylistName = nil }
-            let folders = library.playlists(in: sourceID).filter { !$0.isRoot }
-            if !folders.isEmpty { Divider() }
-            ForEach(folders) { playlist in
-                Button(playlist.name) { targetPlaylistName = playlist.name }
-            }
-        } label: {
-            Label(targetPlaylistName ?? "Hauptordner", systemImage: "arrow.down.to.line")
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Ziel für neue Titel")
-    }
-
-    /// Ordner, in den neue Titel geladen werden.
-    private var targetFolder: URL? {
-        if let playlist { return playlist.url }
-        guard let root = source?.rootURL else { return nil }
-        guard let name = targetPlaylistName else { return root }
-        return root.appendingPathComponent(name, isDirectory: true)
-    }
-
-    private func submit() {
-        let text = quickAdd.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let folder = targetFolder else { return }
-        let parsed = ListParser.parse(text)
-        if parsed.entries.count > 1 {
-            openAddSeveral(with: text)
-            quickAdd.text = ""
-            return
-        }
-        guard let entry = parsed.entries.first else { return }
-        if entry.isLink {
-            queue.add(entries: [entry], to: folder)
-            quickAdd.text = ""
-            quickAdd.close()
-        } else {
-            quickAdd.search(entry.displayText, tools: tools.paths, cookies: settings.cookieBrowser)
-        }
-    }
-
-    private var suggestions: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(quickAdd.query)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Button("Weitere Vorschläge") {
-                    quickAdd.loadMore(tools: tools.paths, cookies: settings.cookieBrowser)
-                }
-                .disabled(quickAdd.phase == .searching)
-                Button {
-                    quickAdd.close()
-                } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-            suggestionContent
-        }
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.cardBackground))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border.opacity(0.7)))
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
-    }
-
-    @ViewBuilder
-    private var suggestionContent: some View {
-        switch quickAdd.phase {
-        case .searching:
-            ProgressView()
-                .controlSize(.small)
-                .frame(maxWidth: .infinity, minHeight: 90)
-        case .empty:
-            Text("Keine Treffer")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 60)
-        case let .failed(message):
-            Text(message)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 60)
-        case .results, .idle:
-            let checker = DuplicateChecker(library: library, history: history, sourceID: sourceID)
-            VStack(spacing: 0) {
-                ForEach(quickAdd.results) { candidate in
-                    SuggestionRow(
-                        candidate: candidate,
-                        existing: checker.existingLocation(of: candidate),
-                        isAdded: quickAdd.added.contains(candidate.id)
-                    ) {
-                        add(candidate)
-                    }
-                }
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    private func add(_ candidate: VideoCandidate) {
-        guard let folder = targetFolder else { return }
-        queue.add(candidate: candidate, query: quickAdd.query, to: folder)
-        quickAdd.markAdded(candidate)
-        quickAdd.text = ""
-    }
-
-    private func openAddSeveral(with text: String) {
-        let current = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        input.text = current.isEmpty ? text : current + "\n" + text
-        navigation.showAddSeveral = true
+    /// Öffnet „Hinzufügen“ mit dieser Playlist als Ziel.
+    private func openAdd() {
+        settings.addTargetSource = sourceID
+        settings.addTargetPlaylist = playlist.map { $0.isRoot ? "" : $0.name } ?? ""
+        navigation.selection = .add
+        navigation.focusInput = UUID()
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -328,38 +163,55 @@ struct PlaylistScreen: View {
                 guard let url, TextFileLoader.isSupported(url) else { return }
                 DispatchQueue.main.async {
                     input.load(from: url)
-                    navigation.showAddSeveral = true
+                    openAdd()
                 }
             }
         }
         return accepted
     }
 
-    // MARK: Inhalt
-
-    private var pending: [DownloadItem] {
-        if let playlist { return queue.items(for: playlist.url) }
-        guard let root = source?.rootURL else { return [] }
-        return queue.items(within: root)
+    /// Titel, die gerade hierher geladen werden (ohne fertige).
+    private var incoming: [DownloadItem] {
+        let items: [DownloadItem]
+        if let playlist {
+            items = queue.items(for: playlist.url)
+        } else if let root = source?.rootURL {
+            items = queue.items(within: root)
+        } else {
+            items = []
+        }
+        return items.filter { $0.status != .completed }
     }
+
+    private var incomingBanner: some View {
+        let items = incoming
+        let waiting = items.filter { $0.status.needsAttention }.count
+        let busy = items.filter { $0.status.isBusy }.count
+        var parts: [String] = []
+        if busy > 0 { parts.append("\(busy) \(busy == 1 ? "Titel wird" : "Titel werden") geladen") }
+        if waiting > 0 { parts.append("\(waiting) \(waiting == 1 ? "wartet" : "warten") auf deine Auswahl") }
+        if parts.isEmpty { parts.append(Formatters.count(items.count, "Titel braucht Aufmerksamkeit", "Titel brauchen Aufmerksamkeit")) }
+        return HStack(spacing: 10) {
+            if busy > 0 {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "hand.tap.fill").foregroundStyle(Color.accentColor)
+            }
+            Text(parts.joined(separator: " · "))
+            Spacer()
+            Button("Ansehen") { navigation.selection = .add }
+        }
+        .bannerStyle()
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: Inhalt
 
     @ViewBuilder
     private var content: some View {
-        let incoming = pending
         let tracks = visibleTracks
         VStack(spacing: 0) {
-            if !incoming.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(incoming) { item in
-                            PendingRow(item: item, queue: queue, location: playlistID == nil ? library.locationText(forFolder: item.destination) : nil)
-                            Divider().padding(.leading, 84)
-                        }
-                    }
-                }
-                .frame(maxHeight: min(CGFloat(incoming.count) * 58 + 4, 300))
-                Divider()
-            }
             if tracks.isEmpty {
                 emptyState
             } else {
@@ -410,18 +262,6 @@ struct PlaylistScreen: View {
             trackMenu(for: library.trackIndex.map(\.track).filter { ids.contains($0.id) })
         } primaryAction: { ids in
             library.trackIndex.first { ids.contains($0.track.id) }.map { library.play($0.track) }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if library.tracks(in: sourceID, playlistID: playlistID).count > 12 {
-                HStack {
-                    Spacer()
-                    TextField("Filtern", text: $filter)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 180)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 6)
-            }
         }
     }
 

@@ -29,8 +29,12 @@ final class DownloadItem: ObservableObject, Identifiable {
     @Published var candidates: [VideoCandidate] = []
     @Published var page = 0
     @Published var hasSearched = false
-    /// Bereits gezeigte Vorschläge – „Weitere Vorschläge“ bringt nur neue.
+    /// Bereits gezeigte Vorschläge – Nachladen bringt nur neue.
     var seenCandidateIDs: Set<String> = []
+    /// Beim seitlichen Wischen werden weitere Vorschläge angehängt.
+    @Published var isLoadingMore = false
+    @Published var hasMoreCandidates = true
+    var moreToken: UUID?
 
     @Published var progress: Double = 0
     @Published var detail: String?
