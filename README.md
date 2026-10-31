@@ -1,7 +1,14 @@
 # Velvet
 
-**Deine Musik für unterwegs.** Velvet ist eine native macOS-App (SwiftUI): einen Titel oder eine ganze Liste eingeben, die passende Version per Wischen auswählen und als MP3 (oder MP4) in einen Ordner laden – auf dem Mac oder direkt auf den USB-Stick fürs Auto. Velvet verwaltet den Stick wie eine Musik-App.
+**Spotify für deinen Stick.** Velvet ist eine native macOS-App (SwiftUI) für DJs und alle, die ihre Musik auf einem USB-Stick brauchen – für den Mixer oder fürs Auto. Entdecken wie bei Spotify, kurz reinhören, und was dir gefällt, landet mit einem Klick als Datei auf dem Stick. Die Musik kommt von YouTube.
 
+- **Entdecken:** Vorschläge wie bei Spotify – „Weil du … geladen hast“, „Mix für deinen Ordner“, neue Titel deiner Labels (Defected, Toolroom …), mehr von Künstlern auf deinem Stick und ähnliche Künstler. Velvet lernt, was dir gefällt
+- **Set bauen:** einen Song eingeben – Velvet stellt passende Titel zusammen, filtert nach Tempo und Tonart, sortiert harmonisch (Camelot) und lädt das ganze Set auf den Stick. „Passende ergänzen“ macht dasselbe für einen vorhandenen Ordner
+- **Vorhören:** jeder Vorschlag spielt direkt in Velvet, ab der Stelle, wo der Titel losgeht. Leertaste = Pause
+- **Tempo & Tonart:** nach jedem Download ermittelt Velvet BPM und Tonart und schreibt sie in die MP3 – Mixer, rekordbox und Velvet zeigen sie an
+- **Extended bevorzugen:** Velvet sucht und schlägt lange Versionen (Extended, Club, Original Mix) zuerst vor und erkennt Radio Edits, Remixe, Live-Mitschnitte und Sped-up-Versionen
+- **Spotify-Playlists:** Link einfügen – Velvet lädt alle Titel. Oder Playlist mit einem Ordner verknüpfen: Neue Titel kommen auf Klick dazu
+- **rekordbox-Export:** jeder Ordner wird zur Playlist, mit Tempo und Tonart
 - **Hinzufügen:** ein Titel oder 50 auf einmal – rechts siehst du sofort, was erkannt wurde und was schon vorhanden ist. Nummern, Aufzählungszeichen, Tabellen, Spotify-Exporte usw. werden automatisch erkannt
 - **Version auswählen per Wischen:** fünf Vorschläge mit Vorschaubild; zur Seite wischen lädt endlos weitere, zurückwischen geht jederzeit. Oder einfach einen eigenen Link einfügen
 - **Ordner wie Playlists:** deine Ordner auf dem Mac und jeder eingesteckte Stick mit seinen Ordnern stehen in der Seitenleiste – jeder unter seinem echten Namen
@@ -9,9 +16,13 @@
 - **Andere Version:** falschen Titel erwischt? Rechtsklick → „Andere Version …“, z. B. die Extended Version – die alte Datei wird ersetzt
 - **Stick verwalten:** umbenennen, verschieben, vom Mac auf den Stick kopieren, löschen, fürs Auto aufräumen, auswerfen
 - **Verlauf:** was du wann wohin geladen hast – und ob es noch da ist
-- MP3 (Beste VBR / 320 / 192 / 128 kbit/s, mit Cover und Tags) oder MP4 (Beste / 1080p / 720p / 480p)
+- MP3 (Beste VBR / 320 / 192 / 128 kbit/s, mit Cover und Tags), M4A (Original-Tonspur ohne Umwandlung) oder MP4 (Beste / 1080p / 720p / 480p)
 
 yt-dlp, ffmpeg, ffprobe und deno sind **in der App enthalten** – nichts muss installiert werden.
+
+| Entdecken | Set bauen – nach Tonart gefiltert und harmonisch sortiert |
+|---|---|
+| ![Entdecken](Docs/entdecken.png) | ![Set bauen](Docs/set-bauen.png) |
 
 | Hinzufügen | Version auswählen – zur Seite wischen für mehr |
 |---|---|
@@ -66,7 +77,14 @@ Beim **allerersten Start** prüft Velvet die Werkzeuge und entpackt yt-dlp nach 
 
 ## So benutzt du Velvet
 
-**Links** in der Seitenleiste: ganz oben **Hinzufügen**, darunter **Dieser Mac** mit den Ordnern, die du dir dort hinlegst, und jeder eingesteckte Stick mit seinen Ordnern. Ein Ordner ist in Velvet das, was anderswo eine Playlist ist.
+**Links** in der Seitenleiste: ganz oben **Entdecken** und **Hinzufügen**, darunter **Dieser Mac** mit den Ordnern, die du dir dort hinlegst, und jeder eingesteckte Stick mit seinen Ordnern. Ein Ordner ist in Velvet das, was anderswo eine Playlist ist.
+
+**Entdecken** (⌘E):
+- Oben **Set bauen**: einen Song, Künstler oder YouTube-Link eingeben → Velvet sammelt aus mehreren YouTube-Mixen passende Titel. Links filterst du (Anzahl, nur lange Versionen, Tempo ± BPM, harmonisch passende Tonart) und wählst die Reihenfolge (Empfehlung, Tempo aufsteigend, harmonisch). Rechts hörst du rein und hakst ab. Unten den Zielordner wählen (oder einen neuen auf dem Stick anlegen lassen) → **„20 Titel auf den Stick“**.
+- Darunter **Reihen zum Durchwischen**: Klick aufs Bild = vorhören, **+** = auf den Stick (bei „Mix für …“ direkt in diesen Ordner), **✕** = nicht interessiert. „Alle laden“ lädt eine ganze Reihe. Rechtsklick: in einen anderen Ordner laden, Set daraus bauen, dem Kanal folgen.
+- **Spotify-Playlists → Stick**: Playlist mit einem Ordner verknüpfen. Velvet zeigt, wie viele Titel neu sind, und lädt sie auf Klick – bewusst gelöschte kommen nicht zurück. (Spotify gibt Velvet höchstens 100 Titel pro Playlist.)
+- **Labels & Kanäle**: Labels antippen, denen du folgen willst, oder einen Kanal-Link einfügen. Ihre neuen Titel erscheinen unter „Neu von deinen Labels“.
+- Vorschläge werden alle paar Stunden neu geholt, ↻ oben rechts holt sofort neue. Velvet lernt aus dem, was du lädst, länger als 30 Sekunden hörst, ausblendest oder schnell wieder löschst – alles bleibt auf deinem Mac.
 
 - **Dieser Mac:** **+** → **Neuer Ordner …** (Ort und Namen wählen) oder **Vorhandenen Ordner hinzufügen …** – z. B. „Downloads“. Rechtsklick → **Aus der Seitenleiste entfernen** nimmt ihn wieder heraus, die Dateien bleiben.
 - **Stick:** erscheint automatisch, sobald er eingesteckt ist, und verschwindet beim Abziehen. **+** legt einen Ordner auf dem Stick an, ⏏︎ wirft ihn aus. Titel direkt auf dem Stick stehen unter dem Namen des Sticks.
@@ -79,9 +97,11 @@ Beim **allerersten Start** prüft Velvet die Werkzeuge und entpackt yt-dlp nach 
 
 In jedem Ordner führt **„Titel hinzufügen“** direkt dorthin – mit diesem Ordner als Ziel.
 
-**Rechtsklick auf einen Titel in einem Ordner:** Abspielen, **Andere Version …** (z. B. Extended – die alte Datei wird ersetzt), Umbenennen, **Verschieben nach** (anderer Ordner), **Kopieren nach** (z. B. vom Mac auf den Stick), Im Finder zeigen, Löschen.
+**Rechtsklick auf einen Titel in einem Ordner:** Abspielen (in Velvet), **Set daraus bauen**, **Andere Version …** (z. B. Extended – die alte Datei wird ersetzt), Umbenennen, **Tempo & Tonart ermitteln**, **Verschieben nach** (anderer Ordner), **Kopieren nach** (z. B. vom Mac auf den Stick), Im Finder zeigen, Löschen.
 
-**Für das Auto:** Menü **…** oben rechts → **Für das Auto aufräumen** entfernt die unsichtbaren Mac-Begleitdateien (`._Titel.mp3`, `.DS_Store`), die viele Autoradios als kaputte Titel anzeigen. Danach **Auswerfen**.
+**In jedem Ordner:** Die Spalten **BPM** und **Tonart** (Camelot, z. B. „8A“) lassen sich sortieren. **„Passende ergänzen“** öffnet den Set-Builder für diesen Ordner. Im Menü **…**: **Tempo & Tonart ermitteln** (für Titel, die noch keine haben) und **Für rekordbox exportieren …** – eine XML-Datei mit allen Titeln, Tempo und Tonart, jeder Ordner als Playlist. In rekordbox: Einstellungen → Erweitert → Datenbank → „rekordbox xml“ wählen, dann die Playlists links unter „rekordbox xml“ importieren.
+
+**Für Auto und Mixer:** Menü **…** oben rechts → **Für Auto & Mixer aufräumen** entfernt die unsichtbaren Mac-Begleitdateien (`._Titel.mp3`, `.DS_Store`), die viele Autoradios und Mixer als kaputte Titel anzeigen. Danach **Auswerfen**. Ist der Stick in einem Format, das Mixer oder Autoradios womöglich nicht lesen (APFS, Mac-Format, exFAT bei älteren Pioneer-Playern), zeigt Velvet einen Hinweis.
 
 Auf dem Stick löscht Velvet **endgültig** (ein Papierkorb auf dem Stick würde im Auto nur stören) und fragt vorher nach. Auf dem Mac landet Gelöschtes im Papierkorb.
 
@@ -89,6 +109,10 @@ Auf dem Stick löscht Velvet **endgültig** (ein Papierkorb auf dem Stick würde
 
 | Tastenkürzel | |
 |---|---|
+| ⌘E | Entdecken |
+| ⇧⌘B | Set bauen |
+| Leertaste | Vorhören: Abspielen/Pause |
+| ⌥⌘← / ⌥⌘→ | 15 Sekunden zurück/vor |
 | ⌘L | Hinzufügen |
 | ⌘↩ | Titel hinzufügen (im Bereich Hinzufügen) |
 | ⌘O | Titel aus Datei hinzufügen |
@@ -108,8 +132,9 @@ Auf dem Stick löscht Velvet **endgültig** (ein Papierkorb auf dem Stick würde
 | `Meine Playlist:`, `## Rock`, `---`, ganze Sätze | als Zusatztext ignoriert |
 | `1. 99 Luftballons`, `7 Rings`, `5:15 - The Who` | Zahlen im Titel bleiben erhalten |
 | `https://youtu.be/…`, `/shorts/…`, `music.youtube.com`, `www.youtube.com/watch?v=…&t=42` | direkter Download (Link wird bereinigt) |
+| `https://open.spotify.com/playlist/…` (oder `/album/…`) | alle Titel der Playlist – die passende Version wird automatisch gewählt |
 | `Queen – Bohemian Rhapsody: https://youtu.be/…`, `[Titel](https://…)` | Link mit Beschriftung |
-| YouTube-Playlist-Link | wird in einzelne Videos aufgeteilt |
+| YouTube-Playlist-Link | wird in einzelne Videos aufgeteilt (YouTube-Mixe: die ersten 50) |
 | `1. A 2. B 3. C` oder `A; B; C` in einer Zeile | mehrere Einträge |
 | Tabellen: Excel/Numbers (Tabs), CSV mit `;` oder `,`, Markdown-Tabellen | „Interpret - Titel“ aus den passenden Spalten |
 | Spotify-Export (Exportify-CSV), Apple-Music-Export (.txt), M3U-Playlists | Titel und Interpret |
@@ -128,7 +153,9 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 
 ## Einstellungen (⌘,)
 
-- **Qualität** für MP3 und MP4 (das Format selbst wählst du unter „Hinzufügen“)
+- **Qualität** für MP3/M4A und MP4 (das Format selbst wählst du unter „Hinzufügen“). YouTube liefert Ton mit höchstens etwa 130 kbit/s – „MP3 320“ macht daraus nicht mehr Qualität. „M4A – Original“ übernimmt die Tonspur ohne zweite Umwandlung
+- **Für DJs:** bevorzugte Version (Egal / Extended / Radio Edit – auch direkt unter „Hinzufügen“ umschaltbar), Dateien sauber benennen („Interpret - Titel (Extended Mix)“ statt „… (Official Video)“), Tempo & Tonart nach dem Download ermitteln und in die MP3 schreiben
+- **Entdecken:** ausgeblendete Vorschläge zurückholen, gefolgte Kanäle und verknüpfte Spotify-Playlists verwalten
 - **Gleichzeitige Downloads** (1–4, Standard 2)
 - **Bei mehreren Titeln den ersten Treffer nehmen** – spart Klicks bei langen Listen
 - **Archivdatei im Ordner führen**
@@ -152,8 +179,16 @@ Textdateien in UTF-8, UTF-16 (Apple-Music-Export) und älteren Windows-Kodierung
 Velvet/
 ├─ App/            VelvetApp (Fenster, Menübefehle), AppDelegate (Beenden-Abfrage, Prozesse aufräumen), AppNavigation
 ├─ Models/         DownloadItem, ItemStatus, DownloadOptions, VideoCandidate, AppSettings, Formatters,
-│                  Library (VolumeInfo, LibrarySource, LibraryFolder, Track, HistoryEntry, DuplicateHit)
-├─ Services/       DownloadManager   – yt-dlp: Suche, Playlists, Downloads, Live-Fortschritt
+│                  Library (VolumeInfo, LibrarySource, LibraryFolder, Track, HistoryEntry, DuplicateHit),
+│                  TrackVersion (Interpret/Titel/Version aus Videotiteln), MusicalKey (Tonarten, Camelot)
+├─ Services/       DownloadManager   – yt-dlp: Suche, Playlists, YouTube-Mixe, Kanäle, Vorschauen, Downloads
+│                  Recommender       – Rangliste aus mehreren Mixen; SetPlanner – Tempo/harmonische Reihenfolge
+│                  TasteStore        – Geschmack, gefolgte Kanäle, Spotify-Verknüpfungen (discover.json)
+│                  AudioAnalyzer     – Tempo (Kammfilter) und Tonart (Chromagramm) mit Accelerate
+│                  AudioTools        – ffmpeg-Dekodierung, ID3-Tags lesen (TBPM/TKEY) und schreiben
+│                  PreviewCache      – Vorschau-Tonspuren im Zwischenspeicher (max. 600 MB)
+│                  MusicServices     – Spotify-Playlists (Einbettungsseite), Deezer (ähnliche Künstler)
+│                  RekordboxExporter – rekordbox-XML
 │                  ProcessRunner     – startet Prozesse, liefert Ausgabe zeilenweise, Abbruch & Timeout
 │                  ToolManager       – findet/prüft yt-dlp, ffmpeg, ffprobe, deno beim Start
 │                  YtDlpInstaller    – entpackt & aktualisiert yt-dlp (SHA-256-geprüft)
@@ -165,8 +200,10 @@ Velvet/
 │                  TitleMatcher, DuplicateChecker – „schon vorhanden?“ (gleich / ähnlich)
 │                  YouTubeLink, TextFileLoader
 ├─ ViewModels/     LibraryViewModel (Mac-Ordner & Sticks), QueueViewModel (Warteschlange je Zielordner),
-│                  InputViewModel (Eingabe), ReplaceViewModel (andere Version)
-└─ Views/          ContentView (Seitenleiste), AddScreen, CandidateViews (Wisch-Auswahl), FolderScreen, HistoryScreen, …
+│                  InputViewModel (Eingabe), ReplaceViewModel (andere Version), DiscoverViewModel (Reihen,
+│                  Spotify-Abgleich), SetBuilderViewModel, PreviewPlayer (Vorhören), AnalysisCenter (BPM/Tonart)
+└─ Views/          ContentView (Seitenleiste), DiscoverScreen, SetBuilderView, PlayerBar, AddScreen,
+                   CandidateViews (Wisch-Auswahl), FolderScreen, HistoryScreen, …
 Binaries/          yt-dlp_macos.zip, ffmpeg, ffprobe, deno (per Script geladen)
 Scripts/           fetch-binaries.sh, install.sh, make-release.sh
 VelvetTests/       Parser-, Ausgabe-, Integrations- und UI-Ablauf-Tests
@@ -174,7 +211,10 @@ VelvetTests/       Parser-, Ausgabe-, Integrations- und UI-Ablauf-Tests
 
 - **MVVM**: Views kennen nur ViewModels; die ViewModels nutzen die Services. `DownloadManager` ist ein eigener Service ohne UI-Abhängigkeit.
 - **Fortschritt**: yt-dlp wird mit `--progress-template` und `--print` gestartet und liefert maschinenlesbare Zeilen (`VELVET|DL|…`). Bei getrennten Video- und Tonspuren wird der Fortschritt gewichtet zusammengerechnet; Nachbearbeitung (Zusammenführen, MP3-Umwandlung, Cover) wird mit Klartext angezeigt.
-- **Suche**: `ytsearch` mit `--flat-playlist` (eine Anfrage, ca. 1 Sekunde). Beim Wischen werden jeweils fünf weitere, noch nicht gezeigte Videos angehängt.
+- **Suche**: `ytsearch` mit `--flat-playlist` (eine Anfrage, ca. 1 Sekunde). Beim Wischen werden jeweils fünf weitere, noch nicht gezeigte Videos angehängt. Mit „Extended“ wird der Suchbegriff ergänzt und lange Versionen kommen nach vorn.
+- **Empfehlungen**: der YouTube-Mix eines Videos (`watch?v=ID&list=RDAMVMID`, 25 Titel in ca. 1,5 Sekunden). Mehrere Mixe werden zusammengeführt: Je öfter ein Lied vorkommt, desto höher steht es. Gleiche Lieder aus verschiedenen Uploads zählen einmal (die bevorzugte Version gewinnt), DJ-Sets, Live-Mitschnitte, Sped-up-Versionen und Vorhandenes fliegen raus. Spotify-Empfehlungen sind für neue Apps seit 2024 gesperrt; Deezer liefert ähnliche Künstler.
+- **Vorhören**: Direkte Stream-Adressen blockt YouTube oft. Velvet lädt deshalb über yt-dlp die Tonspur in kleiner Qualität (AAC, ~48 kbit/s, ca. 5 Sekunden) in den Zwischenspeicher und spielt sie mit AVPlayer – beim Drüberfahren schon vorab. Dieselbe Datei dient der Tempo- und Tonart-Analyse.
+- **Tempo & Tonart**: ffmpeg dekodiert mono mit 11 025 Hz. Tempo: spektraler Fluss → Autokorrelation → Kammfilter 60–200 BPM mit Vorliebe für Club-Tempi. Tonart: Chromagramm → Krumhansl/Temperley-Profile mit leichtem Moll-Ausgleich. Ergebnis als TBPM/TKEY in der MP3 (Cover und Tags bleiben).
 - **Warteschlange**: Jeder Titel kennt seinen Zielordner; mehrere laden parallel. Fertige Titel stehen danach im Ordner.
 - **yt-dlp**: Velvet nutzt das offizielle `yt-dlp_macos.zip` statt der Einzeldatei `yt-dlp_macos`. Grund: Die Einzeldatei entpackt sich bei *jedem* Aufruf neu und braucht dafür ca. 7 Sekunden – bei jeder Suche und jedem Download. Die Ordner-Variante startet in 0,2 Sekunden. Weil sie sich nicht selbst aktualisieren kann, übernimmt Velvet das Update (Download von GitHub, SHA-256-Prüfung, Testlauf, dann Austausch).
 - **deno** wird von yt-dlp benötigt, um YouTubes JavaScript-Prüfungen zu lösen – ohne fehlen viele Formate.
@@ -191,6 +231,9 @@ TEST_RUNNER_VELVET_INTEGRATION=1 xcodebuild test -project Velvet.xcodeproj -sche
 
 # Kompletter Ablauf über die ViewModels inkl. Bildschirmfotos (hell/dunkel) nach /tmp/velvet-shots
 TEST_RUNNER_VELVET_SNAPSHOT_DIR=/tmp/velvet-shots xcodebuild test -project Velvet.xcodeproj -scheme Velvet -only-testing:VelvetTests/UIFlowSnapshotTests
+
+# Entdecken und Set-Builder mit echten Downloads, Analyse und Vorhören
+TEST_RUNNER_VELVET_SNAPSHOT_DIR=/tmp/velvet-shots xcodebuild test -project Velvet.xcodeproj -scheme Velvet -only-testing:VelvetTests/DiscoverSnapshotTests
 ```
 
 ## Lizenzen und Hinweise
@@ -198,5 +241,7 @@ TEST_RUNNER_VELVET_SNAPSHOT_DIR=/tmp/velvet-shots xcodebuild test -project Velve
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) – Unlicense
 - [FFmpeg](https://ffmpeg.org) – statischer Build von [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de) (GPL)
 - [deno](https://deno.com) – MIT
+
+Spotify-Playlists liest Velvet über die öffentliche Einbettungsseite, ähnliche Künstler kommen von der [Deezer-API](https://developers.deezer.com). Tempo und Tonart sind geschätzt – wie bei jeder Analyse-Software lohnt bei wichtigen Übergängen ein kurzer Check.
 
 Velvet ist für den privaten Gebrauch gedacht. Lade nur Inhalte herunter, an denen du die Rechte hast oder deren Download erlaubt ist, und beachte die Nutzungsbedingungen von YouTube.

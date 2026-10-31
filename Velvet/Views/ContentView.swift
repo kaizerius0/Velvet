@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
+    @EnvironmentObject private var player: PreviewPlayer
 
     var body: some View {
         NavigationSplitView {
@@ -10,6 +11,9 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 320)
         } detail: {
             detail
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if player.isActive { PlayerBar() }
+                }
         }
         .frame(minWidth: 980, minHeight: 640)
         .sheet(item: Binding(
@@ -32,8 +36,8 @@ struct ContentView: View {
             }
         }
         .onChange(of: library.newlyMountedSourceID) { id in
-            // Beim Hinzufügen nicht wegspringen.
-            if let id, navigation.selection != .add { navigation.selection = .allTracks(source: id) }
+            // Beim Hinzufügen und Entdecken nicht wegspringen.
+            if let id, navigation.selection != .add, navigation.selection != .discover { navigation.selection = .allTracks(source: id) }
         }
         .onChange(of: library.sources) { sources in
             // Ausgeworfener Stick: zurück zu „Hinzufügen“.
@@ -65,7 +69,10 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         switch navigation.selection {
-        case .add, .none:
+        case .discover, .none:
+            DiscoverScreen()
+                .navigationTitle("Entdecken")
+        case .add:
             AddScreen()
                 .navigationTitle("Hinzufügen")
         case .history:
@@ -90,6 +97,7 @@ struct Sidebar: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
+    @EnvironmentObject private var discover: DiscoverViewModel
 
     @State private var renameTarget: LibraryFolder?
     @State private var deleteTarget: LibraryFolder?
@@ -97,6 +105,18 @@ struct Sidebar: View {
     var body: some View {
         List(selection: $navigation.selection) {
             Section {
+                Label {
+                    HStack(spacing: 6) {
+                        Text("Entdecken")
+                        if discover.isRefreshing || discover.setBuilder?.analysisProgress != nil {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "sparkles")
+                }
+                .badge(discover.newSpotifyTrackCount)
+                .tag(AppNavigation.Item.discover)
                 Label {
                     HStack(spacing: 6) {
                         Text("Hinzufügen")
@@ -210,6 +230,7 @@ private struct SourceHeader: View {
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var queue: QueueViewModel
+    @EnvironmentObject private var analysis: AnalysisCenter
     let source: LibrarySource
     let onNewMacFolder: () -> Void
     let onAddMacFolder: () -> Void
@@ -236,8 +257,9 @@ private struct SourceHeader: View {
                     Image(systemName: "eject")
                 }
                 .buttonStyle(.borderless)
-                .disabled(queue.isWriting(to: volume.url))
-                .help(queue.isWriting(to: volume.url) ? "Es werden noch Titel auf diesen Stick geladen" : "Auswerfen")
+                .disabled(queue.isWriting(to: volume.url) || analysis.isBusy(within: volume.url))
+                .help(queue.isWriting(to: volume.url) || analysis.isBusy(within: volume.url)
+                      ? "Velvet schreibt noch auf diesen Stick" : "Auswerfen")
             } else {
                 Menu {
                     Button("Neuer Ordner …", action: onNewMacFolder)

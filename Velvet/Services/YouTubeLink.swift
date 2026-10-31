@@ -62,6 +62,19 @@ enum YouTubeLink {
         return url
     }
 
+    /// YouTube-Mixe („Radio“) heißen RD…; sie sind praktisch endlos.
+    static func isMix(_ url: URL) -> Bool {
+        playlistID(in: url)?.hasPrefix("RD") == true
+    }
+
+    static func mixURL(for videoID: String) -> URL {
+        URL(string: "https://www.youtube.com/watch?v=\(videoID)&list=RDAMVM\(videoID)")!
+    }
+
+    static func channelVideosURL(_ channelID: String) -> URL {
+        URL(string: "https://www.youtube.com/channel/\(channelID)/videos")!
+    }
+
     static func watchURL(_ id: String) -> URL {
         URL(string: "https://www.youtube.com/watch?v=\(id)")!
     }

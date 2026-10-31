@@ -6,6 +6,8 @@ struct CandidateCard: View {
     let candidate: VideoCandidate
     /// „AUTO-STICK › Rock“, wenn der Titel dort schon liegt.
     var existing: String?
+    /// Vorhören in Velvet – ohne: im Browser ansehen.
+    var onPreview: (() -> Void)?
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -25,6 +27,8 @@ struct CandidateCard: View {
                             .padding(5)
                     }
                 }
+
+                VersionBadges(version: candidate.version, limit: 2)
 
                 Text(candidate.title)
                     .font(.callout.weight(.medium))
@@ -65,22 +69,23 @@ struct CandidateCard: View {
         .overlay(alignment: .topTrailing) {
             if isHovering {
                 Button {
-                    NSWorkspace.shared.open(candidate.url)
+                    if let onPreview { onPreview() } else { NSWorkspace.shared.open(candidate.url) }
                 } label: {
-                    Image(systemName: "play.rectangle.fill")
+                    Image(systemName: onPreview == nil ? "play.rectangle.fill" : "play.fill")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(6)
                         .background(Circle().fill(Color.black.opacity(0.6)))
                 }
                 .buttonStyle(.plain)
-                .help("Im Browser ansehen")
+                .help(onPreview == nil ? "Im Browser ansehen" : "Vorhören")
                 .padding(14)
             }
         }
         .help(candidate.title)
         .contextMenu {
             Button("Dieses Video laden", action: onSelect)
+            if let onPreview { Button("Vorhören", action: onPreview) }
             Button("Im Browser ansehen") { NSWorkspace.shared.open(candidate.url) }
             Button("Link kopieren") {
                 NSPasteboard.general.clearContents()
@@ -97,6 +102,7 @@ struct CandidateCarousel: View {
     let isLoadingMore: Bool
     let canLoadMore: Bool
     var existing: (VideoCandidate) -> String? = { _ in nil }
+    var onPreview: ((VideoCandidate) -> Void)?
     let onLoadMore: () -> Void
     let onSelect: (VideoCandidate) -> Void
 
@@ -108,7 +114,8 @@ struct CandidateCarousel: View {
                 ScrollView(.horizontal, showsIndicators: true) {
                     LazyHStack(alignment: .top, spacing: 12) {
                         ForEach(Array(candidates.enumerated()), id: \.element.id) { index, candidate in
-                            CandidateCard(candidate: candidate, existing: existing(candidate)) {
+                            CandidateCard(candidate: candidate, existing: existing(candidate),
+                                          onPreview: onPreview.map { preview in { preview(candidate) } }) {
                                 onSelect(candidate)
                             }
                             .frame(width: Self.cardWidth)

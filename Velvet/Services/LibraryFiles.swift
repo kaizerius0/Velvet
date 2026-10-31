@@ -71,12 +71,16 @@ enum LibraryFiles {
         contents(of: folder).compactMap { url in
             guard isMedia(url), !url.lastPathComponent.hasPrefix("._"),
                   let values = try? url.resourceValues(forKeys: Set(keys)), values.isDirectory != true else { return nil }
+            // Tempo und Tonart aus den Tags (von Velvet, rekordbox, Mixed In Key …) – nur MP3, nur der Kopf.
+            let tags = ID3Reader.tags(of: url)
             return Track(
                 url: url,
                 folderName: folderName,
                 size: Int64(values.fileSize ?? 0),
                 added: values.creationDate ?? values.contentModificationDate ?? .distantPast,
-                isAudio: audioExtensions.contains(url.pathExtension.lowercased())
+                isAudio: audioExtensions.contains(url.pathExtension.lowercased()),
+                bpm: tags?.bpm,
+                key: tags?.key
             )
         }
     }

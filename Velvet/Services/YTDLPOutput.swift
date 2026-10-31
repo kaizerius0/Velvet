@@ -74,7 +74,7 @@ enum YTDLPOutput {
     static func postprocessorLabel(_ name: String) -> String? {
         switch name {
         case "Merger": return "Video und Ton werden zusammengeführt …"
-        case "ExtractAudio": return "Wird in MP3 umgewandelt …"
+        case "ExtractAudio": return "Tonspur wird erstellt …"
         case "VideoRemuxer", "VideoConvertor": return "Wird ins MP4-Format gebracht …"
         case "Metadata", "FFmpegMetadata": return "Metadaten werden geschrieben …"
         case "EmbedThumbnail": return "Cover wird eingebettet …"
@@ -136,7 +136,8 @@ enum YTDLPOutput {
             duration: (entry["duration"] as? NSNumber)?.doubleValue,
             viewCount: (entry["view_count"] as? NSNumber)?.intValue,
             thumbnailURL: bestThumbnail(entry["thumbnails"]) ?? (isYouTube ? YouTubeLink.thumbnailURL(id) : nil),
-            url: url
+            url: url,
+            channelID: entry["channel_id"] as? String
         )
     }
 

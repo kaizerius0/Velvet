@@ -70,7 +70,7 @@ FFMPEG="$("$ROOT/Binaries/ffmpeg" -hide_banner -version | head -1 | awk '{print 
 DENO="$("$ROOT/Binaries/deno" --version | head -1 | awk '{print $2}')"
 NOTES="$DIST/Release-Notes-$VERSION.md"
 {
-    echo "**Liste rein, Videos raus.** Velvet lädt aus einer Liste von YouTube-Titeln oder -Links MP4-Videos oder MP3-Dateien in einen Ordner deiner Wahl. yt-dlp, ffmpeg und deno sind schon enthalten – nichts muss extra installiert werden."
+    echo "**Spotify für deinen Stick.** Velvet ist für DJs und alle, die ihre Musik auf einem USB-Stick brauchen: entdecken wie bei Spotify, kurz reinhören – und was gefällt, landet als MP3 auf dem Stick (Quelle: YouTube). yt-dlp, ffmpeg und deno sind schon enthalten – nichts muss extra installiert werden."
     echo
     if [[ -n "$NOTES_IN" ]]; then
         echo "## Neu in Version $VERSION"

@@ -9,7 +9,7 @@ enum MediaFormat: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .video: return "Video (MP4)"
-        case .audio: return "Nur Audio (MP3)"
+        case .audio: return "Nur Audio"
         }
     }
 
@@ -62,21 +62,27 @@ enum AudioQuality: String, CaseIterable, Identifiable, Sendable {
     case k320
     case k192
     case k128
+    /// Die Tonspur von YouTube unverändert als M4A (AAC) – keine zweite verlustbehaftete Umwandlung.
+    case original
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .best: return "Beste (VBR)"
-        case .k320: return "320 kbit/s"
-        case .k192: return "192 kbit/s"
-        case .k128: return "128 kbit/s"
+        case .best: return "MP3 – Beste (VBR)"
+        case .k320: return "MP3 – 320 kbit/s"
+        case .k192: return "MP3 – 192 kbit/s"
+        case .k128: return "MP3 – 128 kbit/s"
+        case .original: return "M4A – Original, ohne Umwandlung"
         }
     }
 
+    /// „MP3“ oder „M4A“
+    var fileType: String { self == .original ? "M4A" : "MP3" }
+
     var ytDlpValue: String {
         switch self {
-        case .best: return "0"
+        case .best, .original: return "0"
         case .k320: return "320K"
         case .k192: return "192K"
         case .k128: return "128K"
@@ -125,6 +131,9 @@ struct DownloadOptions: Sendable, Equatable {
     var destination: URL
     var useArchive: Bool
     var cookieBrowser: CookieBrowser
+    var preferredVersion: PreferredVersion = .any
+    /// „Interpret - Titel (Extended Mix)“ statt des Videotitels mit „Official Video“ & Co.
+    var cleanFileNames = false
 
     var archiveURL: URL {
         destination.appendingPathComponent(format.archiveFileName)

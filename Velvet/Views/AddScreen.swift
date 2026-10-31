@@ -130,14 +130,19 @@ struct AddScreen: View {
 
     private var actionBar: some View {
         HStack(spacing: 12) {
-            targetMenu
+            TargetFolderMenu()
             Picker("Format", selection: $settings.format) {
-                Text("MP3").tag(MediaFormat.audio)
+                Text(settings.audioQuality.fileType).tag(MediaFormat.audio)
                 Text("MP4").tag(MediaFormat.video)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
+            Picker("Version", selection: $settings.preferredVersion) {
+                ForEach(PreferredVersion.allCases) { Text($0.title).tag($0) }
+            }
+            .fixedSize()
+            .help(settings.preferredVersion.explanation)
             Button("Aus Datei …") { input.chooseFile() }
             if !hits.isEmpty {
                 Toggle("Vorhandene überspringen", isOn: $settings.skipExisting)
@@ -157,44 +162,10 @@ struct AddScreen: View {
         }
     }
 
-    private var targetMenu: some View {
-        Menu {
-            ForEach(library.sources) { source in
-                let folders = library.folders(in: source.id)
-                if !folders.isEmpty {
-                    Section(source.name) {
-                        ForEach(folders) { folder in
-                            Button {
-                                settings.addTarget = folder.url
-                            } label: {
-                                Label(folder.name, systemImage: folder.isVolumeRoot ? "externaldrive" : "folder")
-                            }
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button("Anderer Ordner …") { chooseTarget() }
-        } label: {
-            Label(targetText, systemImage: targetSymbol)
-        }
-        .fixedSize()
-        .help("Hierhin kommen die neuen Titel")
-    }
-
     private var target: URL? { settings.addTarget }
 
     private var targetSourceID: String? {
         target.flatMap { library.source(containing: $0)?.id }
-    }
-
-    private var targetText: String {
-        target.map { library.locationText(forFolder: $0) } ?? "Ordner wählen …"
-    }
-
-    private var targetSymbol: String {
-        guard let target else { return "folder.badge.questionmark" }
-        return library.isOnStick(target) ? "externaldrive" : "folder"
     }
 
     @discardableResult
@@ -296,7 +267,7 @@ private struct PreviewRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 24, alignment: .trailing)
-            Image(systemName: entry.isPlaylist ? "list.and.film" : entry.isLink ? "link" : "magnifyingglass")
+            Image(systemName: entry.isSpotify ? "music.note.list" : entry.isPlaylist ? "list.and.film" : entry.isLink ? "link" : "magnifyingglass")
                 .font(.caption)
                 .foregroundStyle(entry.isLink ? Color.accentColor : .secondary)
             VStack(alignment: .leading, spacing: 1) {
@@ -323,6 +294,7 @@ struct AddItemCard: View {
     @EnvironmentObject private var library: LibraryViewModel
     @EnvironmentObject private var history: HistoryStore
     @EnvironmentObject private var navigation: AppNavigation
+    @EnvironmentObject private var player: PreviewPlayer
 
     @State private var query = ""
     @State private var link = ""
@@ -413,6 +385,7 @@ struct AddItemCard: View {
                     isLoadingMore: item.isLoadingMore,
                     canLoadMore: item.hasMoreCandidates,
                     existing: { checker.existingLocation(of: $0) },
+                    onPreview: { player.play($0) },
                     onLoadMore: { queue.loadMoreCandidates(for: item) },
                     onSelect: { queue.choose($0, for: item) }
                 )

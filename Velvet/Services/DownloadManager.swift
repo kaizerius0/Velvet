@@ -35,13 +35,21 @@ final class DownloadManager: @unchecked Sendable {
     ///
     /// YouTube sortiert Treffer bei jeder Anfrage leicht anders – deshalb werden für „Andere Vorschläge“
     /// keine festen Seiten geladen, sondern etwas mehr Treffer, aus denen bereits gezeigte aussortiert werden.
-    func search(_ query: String, excluding seen: Set<String> = [], cookies: CookieBrowser = .none) async throws -> [VideoCandidate] {
+    ///
+    /// Mit einer bevorzugten Version („Extended“) wird der Suchbegriff ergänzt und passende Versionen
+    /// kommen nach vorn – sonst bleibt die Reihenfolge von YouTube.
+    func search(
+        _ query: String,
+        excluding seen: Set<String> = [],
+        cookies: CookieBrowser = .none,
+        preferring preference: PreferredVersion = .any
+    ) async throws -> [VideoCandidate] {
         let count = min(seen.count + Self.searchPageSize * 2, 100)
         let arguments = commonArguments(cookies: cookies) + [
             "--flat-playlist",
             "--dump-single-json",
             "--",
-            "ytsearch\(count):\(query)",
+            "ytsearch\(count):\(preference.searchQuery(for: query))",
         ]
         let output = try await run(arguments, timeout: 90)
         try Task.checkCancellation()
@@ -49,25 +57,127 @@ final class DownloadManager: @unchecked Sendable {
             throw failure(from: output, lastError: nil, fallback: "Die Suche ist fehlgeschlagen.")
         }
         let fresh = try YTDLPOutput.parseEntries(Data(output.stdout.utf8)).filter { !seen.contains($0.id) }
-        return Array(fresh.prefix(Self.searchPageSize))
+        return Array(Self.ordered(fresh, preferring: preference).prefix(Self.searchPageSize))
+    }
+
+    /// Stabil nach der bevorzugten Version sortiert – gleich gute Treffer behalten YouTubes Reihenfolge.
+    static func ordered(_ candidates: [VideoCandidate], preferring preference: PreferredVersion) -> [VideoCandidate] {
+        guard preference != .any else { return candidates }
+        return candidates.enumerated()
+            .map { (index: $0.offset, candidate: $0.element, score: preference.score($0.element.version, duration: $0.element.duration)) }
+            .sorted { $0.score != $1.score ? $0.score > $1.score : $0.index < $1.index }
+            .map(\.candidate)
     }
 
     // MARK: - Playlists
 
-    /// Liest alle Videos einer Playlist, ohne sie herunterzuladen.
-    func playlistEntries(_ url: URL, cookies: CookieBrowser = .none) async throws -> [VideoCandidate] {
-        let arguments = commonArguments(cookies: cookies) + [
-            "--flat-playlist",
-            "--dump-single-json",
-            "--",
-            url.absoluteString,
-        ]
+    /// Liest die Videos einer Playlist, ohne sie herunterzuladen – höchstens `limit` Stück.
+    func playlistEntries(_ url: URL, limit: Int? = nil, cookies: CookieBrowser = .none) async throws -> [VideoCandidate] {
+        var arguments = commonArguments(cookies: cookies) + ["--flat-playlist", "--dump-single-json"]
+        if let limit { arguments += ["--playlist-end", "\(limit)"] }
+        arguments += ["--", url.absoluteString]
         let output = try await run(arguments, timeout: 180)
         try Task.checkCancellation()
         guard output.succeeded else {
             throw failure(from: output, lastError: nil, fallback: "Die Playlist konnte nicht gelesen werden.")
         }
         return try YTDLPOutput.parseEntries(Data(output.stdout.utf8))
+    }
+
+    /// Titel, Kanal und Länge eines einzelnen Videos (z. B. aus einem eingefügten Link).
+    func videoInfo(_ url: URL, cookies: CookieBrowser = .none) async throws -> VideoCandidate {
+        let arguments = commonArguments(cookies: cookies) + [
+            "--no-playlist", "--skip-download", "--dump-single-json", "--", url.absoluteString,
+        ]
+        let output = try await run(arguments, timeout: 90)
+        try Task.checkCancellation()
+        guard output.succeeded,
+              let root = try? JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any],
+              let info = YTDLPOutput.candidate(from: root) else {
+            throw failure(from: output, lastError: nil, fallback: "Das Video wurde nicht gefunden.")
+        }
+        // Bei voller Auswertung steht unter „url“ die Stream-Adresse – Velvet braucht die Seite.
+        return VideoCandidate(id: info.id, title: info.title, channel: info.channel, duration: info.duration,
+                              viewCount: info.viewCount, thumbnailURL: info.thumbnailURL,
+                              url: YouTubeLink.watchURL(info.id), channelID: info.channelID)
+    }
+
+    // MARK: - Empfehlungen
+
+    /// Der YouTube-Mix zu einem Video: ähnliche Titel, die YouTube Music als „Radio“ spielen würde.
+    /// Der Mix ist praktisch endlos – deshalb immer mit Grenze.
+    func mix(for videoID: String, limit: Int = 25, cookies: CookieBrowser = .none) async throws -> [VideoCandidate] {
+        let entries = try await playlistEntries(YouTubeLink.mixURL(for: videoID), limit: limit + 1, cookies: cookies)
+        return entries.filter { $0.id != videoID }
+    }
+
+    /// Die neuesten Uploads eines Kanals (z. B. eines Labels).
+    func channelUploads(_ channelID: String, limit: Int = 12, cookies: CookieBrowser = .none) async throws -> [VideoCandidate] {
+        try await playlistEntries(YouTubeLink.channelVideosURL(channelID), limit: limit, cookies: cookies)
+    }
+
+    /// Name und ID eines Kanals aus einem Link („youtube.com/@defectedmusic“).
+    func channelInfo(_ url: URL, cookies: CookieBrowser = .none) async throws -> (id: String, name: String) {
+        var page = url
+        if !page.path.hasSuffix("/videos") { page = page.appendingPathComponent("videos") }
+        let arguments = commonArguments(cookies: cookies) + [
+            "--flat-playlist", "--dump-single-json", "--playlist-end", "1", "--", page.absoluteString,
+        ]
+        let output = try await run(arguments, timeout: 60)
+        try Task.checkCancellation()
+        guard output.succeeded,
+              let root = try? JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any],
+              let id = (root["channel_id"] as? String) ?? (root["id"] as? String), id.hasPrefix("UC") else {
+            throw failure(from: output, lastError: nil, fallback: "Der Kanal wurde nicht gefunden.")
+        }
+        let name = (root["channel"] as? String) ?? (root["uploader"] as? String) ?? (root["title"] as? String) ?? id
+        return (id, name.replacingOccurrences(of: " - Videos", with: ""))
+    }
+
+    // MARK: - Vorhören
+
+    /// Lädt die Tonspur in kleiner Qualität (AAC, ~48 kbit/s) in den Zwischenspeicher – zum Vorhören
+    /// und für die Tempo-/Tonart-Analyse. Direkte Stream-Adressen blockt YouTube oft; über yt-dlp klappt es.
+    func downloadPreview(
+        _ videoURL: URL,
+        videoID: String,
+        to folder: URL,
+        cookies: CookieBrowser = .none,
+        onProgress: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> URL {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let arguments = commonArguments(cookies: cookies) + [
+            "--no-playlist",
+            "--no-mtime",
+            "--newline",
+            "--progress",
+            "--progress-template", "download:\(YTDLPOutput.Marker.download)|%(info.format_id)s|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
+            "--print", YTDLPOutput.fileTemplate,
+            "--format", "139/ba[ext=m4a]/ba[acodec^=mp4a]/18",
+            "--paths", "home:\(folder.path)",
+            "--paths", "temp:\(folder.appendingPathComponent(".partial").path)",
+            "--output", "\(videoID).%(ext)s",
+            "--", videoURL.absoluteString,
+        ]
+        let found = FileBox()
+        let output = try await run(arguments, collectStdout: false, timeout: 120) { _, line in
+            switch YTDLPOutput.parse(line) {
+            case let .progress(_, _, downloaded, total, _, _):
+                if let downloaded, let total, total > 0 { onProgress?(min(downloaded / total, 1)) }
+            case let .file(path):
+                found.set(URL(fileURLWithPath: path))
+            default:
+                break
+            }
+        }
+        if output.wasCancelled || Task.isCancelled { throw CancellationError() }
+        if let file = found.value, FileManager.default.fileExists(atPath: file.path) { return file }
+        // Schon im Zwischenspeicher: yt-dlp meldet dann keine neue Datei.
+        if let existing = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .first(where: { $0.deletingPathExtension().lastPathComponent == videoID }) {
+            return existing
+        }
+        throw failure(from: output, lastError: nil, fallback: "Die Vorschau konnte nicht geladen werden.")
     }
 
     // MARK: - Download
@@ -128,6 +238,18 @@ final class DownloadManager: @unchecked Sendable {
                 "--format-sort", options.videoQuality.formatSort,
                 "--merge-output-format", "mp4",
                 "--remux-video", "mp4",
+            ]
+        case .audio where options.audioQuality == .original:
+            // Die AAC-Spur von YouTube nur umverpacken – keine zweite verlustbehaftete Umwandlung.
+            arguments += [
+                "--format", "ba[ext=m4a]/ba[acodec^=mp4a]/ba/b",
+                "--extract-audio",
+                "--audio-format", "m4a",
+                "--embed-thumbnail",
+                "--convert-thumbnails", "jpg",
+                "--parse-metadata", "title:(?P<meta_artist>.+?) - (?P<meta_title>.+)",
+                "--replace-in-metadata", "meta_title",
+                #"\s*[\(\[][^\)\]]*(?i:official|offiziell|lyric|video|audio|visuali[sz]er|remaster|hd|4k)[^\)\]]*[\)\]]"#, "",
             ]
         case .audio:
             arguments += [
@@ -216,6 +338,15 @@ final class DownloadManager: @unchecked Sendable {
         let message = error.map(YTDLPOutput.friendlyError) ?? fallback
         return DownloadFailure(message: message, log: output.tail)
     }
+}
+
+/// Merkt sich einen Wert aus den Ausgabezeilen (die nacheinander, aber nicht auf dem Main Actor kommen).
+private final class FileBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: URL?
+
+    var value: URL? { lock.locked { stored } }
+    func set(_ url: URL) { lock.locked { stored = url } }
 }
 
 // MARK: - Fortschritt eines Downloads

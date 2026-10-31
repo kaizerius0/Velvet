@@ -61,6 +61,17 @@ final class ToolManager: ObservableObject {
 
     var isReady: Bool { state == .ready }
 
+    private var cachedManager: (paths: ToolPaths, manager: DownloadManager)?
+
+    /// Ein `DownloadManager` für die aktuellen Werkzeuge – solange sie bereit sind.
+    var downloadManager: DownloadManager? {
+        guard let paths else { return nil }
+        if let cachedManager, cachedManager.paths == paths { return cachedManager.manager }
+        let manager = DownloadManager(tools: paths)
+        cachedManager = (paths, manager)
+        return manager
+    }
+
     // MARK: Prüfen
 
     func prepare(autoUpdate: Bool) async {

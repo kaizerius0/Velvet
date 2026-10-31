@@ -22,7 +22,8 @@ struct ParsedEntry: Identifiable, Hashable, Sendable {
         return nil
     }
 
-    var isPlaylist: Bool { url.map(YouTubeLink.isPlaylist) ?? false }
+    var isPlaylist: Bool { url.map { YouTubeLink.isPlaylist($0) || SpotifyEmbed.isSupported($0) } ?? false }
+    var isSpotify: Bool { url.map(SpotifyEmbed.isSupported) ?? false }
 
     var displayText: String {
         switch kind {

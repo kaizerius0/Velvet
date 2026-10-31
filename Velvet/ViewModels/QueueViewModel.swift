@@ -24,6 +24,8 @@ final class QueueViewModel: ObservableObject {
     private let tools: ToolManager
     private let history: HistoryStore
     private let library: LibraryViewModel
+    /// Ermittelt nach dem Download Tempo und Tonart (wird von der App gesetzt).
+    weak var analysis: AnalysisCenter?
     private var cachedManager: DownloadManager?
     private var cachedPaths: ToolPaths?
     private var pendingSearches: [DownloadItem] = []
@@ -98,11 +100,34 @@ final class QueueViewModel: ObservableObject {
     }
 
     /// Ein schon gewähltes Video (z. B. aus den Vorschlägen unter dem Suchfeld).
-    func add(candidate: VideoCandidate, query: String?, to folder: URL) {
+    @discardableResult
+    func add(candidate: VideoCandidate, query: String?, to folder: URL) -> DownloadItem {
         let item = DownloadItem(candidate: candidate, query: query, destination: folder, options: prepare(folder))
         items.append(item)
         pumpDownloads()
         refresh()
+        return item
+    }
+
+    /// Mehrere schon gewählte Videos auf einmal – z. B. ein ganzes Set.
+    func add(candidates: [VideoCandidate], to folder: URL) {
+        guard !candidates.isEmpty else { return }
+        let options = prepare(folder)
+        for candidate in candidates where !isQueued(candidate.id, to: folder) {
+            items.append(DownloadItem(candidate: candidate, query: nil, destination: folder, options: options))
+        }
+        pumpDownloads()
+        refresh()
+    }
+
+    /// Wird dieses Video gerade (oder wurde es eben) in den Ordner geladen?
+    func isQueued(_ videoID: String, to folder: URL) -> Bool {
+        items(for: folder).contains { $0.videoID == videoID && !$0.status.isProblem && $0.status != .ignored }
+    }
+
+    /// Der Eintrag zu einem Video – irgendwo in der Warteschlange.
+    func item(forVideo videoID: String) -> DownloadItem? {
+        items.last { $0.videoID == videoID && $0.status != .ignored }
     }
 
     private func prepare(_ folder: URL) -> DownloadOptions {
@@ -121,7 +146,9 @@ final class QueueViewModel: ObservableObject {
             enqueueSearch(item)
         case .link:
             guard let url = item.sourceURL else { return }
-            if YouTubeLink.isChannel(url) {
+            if SpotifyEmbed.isSupported(url) {
+                resolveSpotify(item)
+            } else if YouTubeLink.isChannel(url) {
                 item.status = .failed("Kanal-Links werden nicht unterstützt.")
             } else if YouTubeLink.isPlaylist(url) {
                 resolvePlaylist(item)
@@ -181,7 +208,9 @@ final class QueueViewModel: ObservableObject {
     func retry(_ item: DownloadItem) {
         stopWork(of: item)
         if let url = item.sourceURL {
-            if YouTubeLink.isPlaylist(url) {
+            if SpotifyEmbed.isSupported(url) {
+                resolveSpotify(item)
+            } else if YouTubeLink.isPlaylist(url) {
                 resolvePlaylist(item)
             } else {
                 queueDownload(item)
@@ -245,6 +274,7 @@ final class QueueViewModel: ObservableObject {
         if let current = item.videoID { excluded.insert(current) }
         let query = item.query
         let cookies = item.options.cookieBrowser
+        let preference = item.options.preferredVersion
         let token = UUID()
         item.moreToken = token
         item.isLoadingMore = true
@@ -252,7 +282,7 @@ final class QueueViewModel: ObservableObject {
         Task {
             let results: [VideoCandidate]?
             do {
-                results = try await manager.search(query, excluding: excluded, cookies: cookies)
+                results = try await manager.search(query, excluding: excluded, cookies: cookies, preferring: preference)
             } catch {
                 results = nil
             }
@@ -296,13 +326,14 @@ final class QueueViewModel: ObservableObject {
         var excluded = item.seenCandidateIDs
         if let current = item.videoID { excluded.insert(current) }
         let cookies = item.options.cookieBrowser
+        let preference = item.options.preferredVersion
         item.searchToken = token
         activeSearchCount += 1
 
         item.searchTask = Task { [weak self] in
             let outcome: Result<[VideoCandidate], Error>
             do {
-                outcome = .success(try await manager.search(query, excluding: excluded, cookies: cookies))
+                outcome = .success(try await manager.search(query, excluding: excluded, cookies: cookies, preferring: preference))
             } catch {
                 outcome = .failure(error)
             }
@@ -329,9 +360,9 @@ final class QueueViewModel: ObservableObject {
             item.seenCandidateIDs.formUnion(fresh.map(\.id))
             if fresh.isEmpty {
                 item.status = .noResults
-            } else if settings.autoPickFirstResult, item.allowAutoPick {
+            } else if settings.autoPickFirstResult || item.forceAutoPick, item.allowAutoPick {
                 item.allowAutoPick = false
-                choose(fresh[0], for: item)
+                choose(Self.bestPick(fresh, expectedDuration: item.expectedDuration), for: item)
             } else {
                 item.status = .needsSelection
             }
@@ -341,19 +372,37 @@ final class QueueViewModel: ObservableObject {
         }
     }
 
+    /// Beim automatischen Wählen: keine Live-Mitschnitte, Sped-up-Versionen oder ganzen DJ-Sets,
+    /// und bei bekannter Länge (Spotify) die passende Version.
+    nonisolated static func bestPick(_ candidates: [VideoCandidate], expectedDuration: TimeInterval?) -> VideoCandidate {
+        let usable = candidates.filter { candidate in
+            let version = candidate.version
+            return !version.isFullSet && !version.badges.contains(where: \.isWarning)
+        }
+        let pool = usable.isEmpty ? candidates : usable
+        guard let expected = expectedDuration, expected > 0 else { return pool[0] }
+        // Nur deutlich abweichende Längen (z. B. 10-Minuten-Video statt 3-Minuten-Lied) aussortieren.
+        return pool.first { candidate in
+            guard let duration = candidate.duration else { return true }
+            return abs(duration - expected) <= max(45, expected * 0.35) || candidate.version.badges.contains(.extended)
+        } ?? pool[0]
+    }
+
     // MARK: - Playlists
 
     private func resolvePlaylist(_ item: DownloadItem) {
         guard let manager, let url = item.sourceURL else { return }
         let token = UUID()
         let cookies = item.options.cookieBrowser
+        // YouTube-Mixe sind endlos – die ersten 50 reichen.
+        let limit = YouTubeLink.isMix(url) ? 50 : nil
         item.searchToken = token
         item.status = .resolvingPlaylist
 
         item.searchTask = Task { [weak self] in
             let outcome: Result<[VideoCandidate], Error>
             do {
-                outcome = .success(try await manager.playlistEntries(url, cookies: cookies))
+                outcome = .success(try await manager.playlistEntries(url, limit: limit, cookies: cookies))
             } catch {
                 outcome = .failure(error)
             }
@@ -378,6 +427,71 @@ final class QueueViewModel: ObservableObject {
         guard let index = items.firstIndex(where: { $0 === item }) else { return }
         let children = entries.map { DownloadItem(candidate: $0, query: nil, destination: item.destination, options: item.options) }
         items.replaceSubrange(index...index, with: children)
+    }
+
+    // MARK: - Spotify
+
+    /// Liest eine Spotify-Playlist und sucht jeden Titel auf YouTube (die passende Version wird automatisch gewählt).
+    private func resolveSpotify(_ item: DownloadItem) {
+        guard let url = item.sourceURL else { return }
+        let token = UUID()
+        item.searchToken = token
+        item.status = .resolvingPlaylist
+
+        item.searchTask = Task { [weak self] in
+            let outcome: Result<SpotifyEmbed.Playlist, Error>
+            do {
+                outcome = .success(try await SpotifyEmbed.load(url))
+            } catch {
+                outcome = .failure(error)
+            }
+            guard let self, item.searchToken == token else { return }
+            item.searchTask = nil
+            item.searchToken = nil
+            switch outcome {
+            case let .success(playlist) where !playlist.tracks.isEmpty:
+                self.expand(item, intoSpotify: playlist.tracks)
+            case .success:
+                item.status = .failed("Die Spotify-Playlist ist leer.")
+            case let .failure(error):
+                if !(error is CancellationError) { item.status = .failed(error.localizedDescription) }
+            }
+            self.pumpSearches()
+            self.refresh()
+        }
+    }
+
+    private func expand(_ item: DownloadItem, intoSpotify tracks: [SpotifyEmbed.Track]) {
+        guard let index = items.firstIndex(where: { $0 === item }) else { return }
+        let entries = tracks.enumerated().map { ParsedEntry(id: $0.offset, kind: .search($0.element.searchText), label: nil) }
+        let checker = DuplicateChecker(library: library, history: history, sourceID: library.source(containing: item.destination)?.id)
+        let hits = settings.skipExisting ? checker.hits(for: entries) : [:]
+        let children: [DownloadItem] = entries.map { entry in
+            let child = DownloadItem(entry: entry, destination: item.destination, options: item.options)
+            child.forceAutoPick = true
+            child.expectedDuration = tracks[entry.id].duration
+            if let hit = hits[entry.id], hit.strength == .exact, hit.inCurrentLibrary {
+                child.status = .skipped(.inLibrary(hit.location))
+            }
+            return child
+        }
+        items.replaceSubrange(index...index, with: children)
+        children.filter { $0.status == .searching }.forEach(enqueueSearch)
+    }
+
+    /// Titel einer Spotify-Playlist direkt in die Warteschlange (Spotify-Abgleich in „Entdecken“).
+    func add(spotifyTracks tracks: [SpotifyEmbed.Track], to folder: URL) {
+        guard !tracks.isEmpty else { return }
+        let options = prepare(folder)
+        for (offset, track) in tracks.enumerated() {
+            let entry = ParsedEntry(id: offset, kind: .search(track.searchText), label: nil)
+            let item = DownloadItem(entry: entry, destination: folder, options: options)
+            item.forceAutoPick = true
+            item.expectedDuration = track.duration
+            items.append(item)
+            enqueueSearch(item)
+        }
+        refresh()
     }
 
     // MARK: - Downloads
@@ -471,7 +585,8 @@ final class QueueViewModel: ObservableObject {
         item.phaseText = nil
 
         switch outcome {
-        case let .success(.completed(file, videoID)):
+        case let .success(.completed(downloaded, videoID)):
+            let file = item.options.cleanFileNames ? Self.renameCleanly(downloaded, title: item.chosen?.title ?? item.title, channel: item.chosen?.channel) : downloaded
             item.status = .completed
             item.progress = 1
             item.outputFile = file
@@ -486,6 +601,9 @@ final class QueueViewModel: ObservableObject {
             replacePreviousFile(of: item)
             library.refreshIfAffected(by: file)
             cleanUpTemporaryFiles(in: item.destination)
+            if settings.analyzeDownloads, item.options.format == .audio {
+                analysis?.enqueue([file], knownVideoID: item.videoID)
+            }
         case let .success(.skipped(reason)):
             item.status = .skipped(reason)
             item.progress = 1
@@ -500,6 +618,20 @@ final class QueueViewModel: ObservableObject {
             } else {
                 item.status = .failed(Self.message(for: error))
             }
+        }
+    }
+
+    /// „Toto - Africa (Official HD Video).mp3“ → „Toto - Africa.mp3“, „… (Extended Mix)“ bleibt.
+    nonisolated static func renameCleanly(_ file: URL, title: String?, channel: String?) -> URL {
+        let version = TrackVersion.parse(title ?? file.deletingPathExtension().lastPathComponent, channel: channel)
+        let name = version.fileName
+        guard !name.isEmpty, name != file.deletingPathExtension().lastPathComponent else { return file }
+        let target = LibraryFiles.uniqueURL(file.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension(file.pathExtension))
+        do {
+            try FileManager.default.moveItem(at: file, to: target)
+            return target
+        } catch {
+            return file
         }
     }
 

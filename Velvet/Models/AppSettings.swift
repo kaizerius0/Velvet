@@ -14,6 +14,9 @@ final class AppSettings: ObservableObject {
         static let autoUpdateYtDlp = "autoUpdateYtDlp"
         static let skipExisting = "skipExisting"
         static let addTargetPath = "addTargetPath"
+        static let preferredVersion = "preferredVersion"
+        static let cleanFileNames = "cleanFileNames"
+        static let analyzeDownloads = "analyzeDownloads"
     }
 
     private let defaults: UserDefaults
@@ -50,6 +53,18 @@ final class AppSettings: ObservableObject {
     @Published var skipExisting: Bool {
         didSet { defaults.set(skipExisting, forKey: Key.skipExisting) }
     }
+    /// Extended, Radio Edit oder egal – gilt für Suche, Vorschläge und Sets.
+    @Published var preferredVersion: PreferredVersion {
+        didSet { defaults.set(preferredVersion.rawValue, forKey: Key.preferredVersion) }
+    }
+    /// Dateien „Interpret - Titel (Extended Mix)“ nennen statt wie das Video.
+    @Published var cleanFileNames: Bool {
+        didSet { defaults.set(cleanFileNames, forKey: Key.cleanFileNames) }
+    }
+    /// Nach dem Download Tempo und Tonart ermitteln und in die Datei schreiben.
+    @Published var analyzeDownloads: Bool {
+        didSet { defaults.set(analyzeDownloads, forKey: Key.analyzeDownloads) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -59,6 +74,8 @@ final class AppSettings: ObservableObject {
             Key.maxParallelDownloads: 2,
             Key.autoUpdateYtDlp: true,
             Key.skipExisting: true,
+            Key.cleanFileNames: true,
+            Key.analyzeDownloads: true,
         ])
         format = MediaFormat(rawValue: defaults.string(forKey: Key.format) ?? "") ?? .audio
         videoQuality = VideoQuality(rawValue: defaults.string(forKey: Key.videoQuality) ?? "") ?? .p720
@@ -70,6 +87,9 @@ final class AppSettings: ObservableObject {
         autoUpdateYtDlp = defaults.bool(forKey: Key.autoUpdateYtDlp)
         skipExisting = defaults.bool(forKey: Key.skipExisting)
         addTargetPath = defaults.string(forKey: Key.addTargetPath) ?? ""
+        preferredVersion = PreferredVersion(rawValue: defaults.string(forKey: Key.preferredVersion) ?? "") ?? .any
+        cleanFileNames = defaults.bool(forKey: Key.cleanFileNames)
+        analyzeDownloads = defaults.bool(forKey: Key.analyzeDownloads)
     }
 
     /// Der gewählte Ordner – sofern es ihn gibt (ein abgezogener Stick zählt nicht).
@@ -87,6 +107,11 @@ final class AppSettings: ObservableObject {
         format == .video ? videoQuality.title : audioQuality.title
     }
 
+    /// „MP3“, „M4A“ oder „MP4“ – für den Format-Schalter.
+    var fileTypeTitle: String {
+        format == .video ? "MP4" : audioQuality.fileType
+    }
+
     func downloadOptions(destination: URL) -> DownloadOptions {
         DownloadOptions(
             format: format,
@@ -94,7 +119,9 @@ final class AppSettings: ObservableObject {
             audioQuality: audioQuality,
             destination: destination,
             useArchive: useArchive,
-            cookieBrowser: cookieBrowser
+            cookieBrowser: cookieBrowser,
+            preferredVersion: preferredVersion,
+            cleanFileNames: cleanFileNames
         )
     }
 }

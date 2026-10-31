@@ -21,6 +21,22 @@ struct VolumeInfo: Identifiable, Hashable, Sendable {
         guard let availableBytes, let totalBytes, totalBytes > 0 else { return nil }
         return 1 - Double(availableBytes) / Double(totalBytes)
     }
+
+    /// Hinweis, wenn Mixer oder Autoradios das Format des Sticks womöglich nicht lesen.
+    var compatibilityHint: String? {
+        guard let format = fileSystem?.lowercased() else { return nil }
+        if format.contains("exfat") {
+            return "Der Stick ist als exFAT formatiert: CDJ-3000 und neuere Geräte lesen das, ältere Pioneer-Player und viele Autoradios oft nicht. Am sichersten ist „MS-DOS (FAT)“."
+        }
+        if format.contains("fat") || format.contains("ms-dos") { return nil }
+        if format.contains("apfs") {
+            return "Der Stick ist als APFS formatiert – das lesen Mixer und Autoradios nicht. Im Festplattendienstprogramm als „MS-DOS (FAT)“ formatieren (löscht den Stick)."
+        }
+        if format.contains("mac os") || format.contains("hfs") {
+            return "Der Stick hat das Mac-Format (HFS+): Pioneer-Player lesen das, viele andere Mixer und Autoradios nicht. Am sichersten ist „MS-DOS (FAT)“."
+        }
+        return nil
+    }
 }
 
 /// Eine Bibliothek in der Seitenleiste: deine Ordner auf dem Mac oder ein eingesteckter Stick.
@@ -57,9 +73,16 @@ struct Track: Identifiable, Hashable, Sendable {
     let size: Int64
     let added: Date
     let isAudio: Bool
+    /// Tempo und Tonart aus den Tags der Datei (TBPM/TKEY), falls vorhanden.
+    var bpm: Double? = nil
+    var key: MusicalKey? = nil
 
     var id: String { url.standardizedFileURL.path }
     var title: String { url.deletingPathExtension().lastPathComponent }
+    /// Zum Sortieren der Tabelle: ohne Tempo ans Ende.
+    var bpmSortValue: Double { bpm ?? 999 }
+    /// Zum Sortieren nach Camelot (1A, 1B, 2A …).
+    var keySortValue: Int { key.map { $0.camelotNumber * 2 + ($0.isMinor ? 0 : 1) } ?? 99 }
     var format: String { url.pathExtension.uppercased() }
     var folderID: String { url.deletingLastPathComponent().standardizedFileURL.path }
 }

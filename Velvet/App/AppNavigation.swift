@@ -4,6 +4,8 @@ import Foundation
 @MainActor
 final class AppNavigation: ObservableObject {
     enum Item: Hashable {
+        /// Vorschläge, Set-Builder, Labels und Spotify-Abgleich.
+        case discover
         /// Titel suchen und hinzufügen – einer oder eine ganze Liste.
         case add
         /// Alle Titel eines Sticks.
@@ -13,16 +15,18 @@ final class AppNavigation: ObservableObject {
         case history
     }
 
-    @Published var selection: Item? = .add
+    @Published var selection: Item? = .discover
     /// Bibliothek, in der ein neuer Ordner angelegt werden soll (aus dem Menü).
     @Published var newFolderSource: String?
     /// Setzt den Cursor ins Eingabefeld von „Hinzufügen“.
     @Published var focusInput = UUID()
+    /// Setzt den Cursor ins Feld des Set-Builders.
+    @Published var focusSetBuilder = UUID()
 
     var sourceID: String? {
         switch selection {
         case let .allTracks(source), let .folder(source, _): return source
-        case .add, .history, .none: return nil
+        case .discover, .add, .history, .none: return nil
         }
     }
 

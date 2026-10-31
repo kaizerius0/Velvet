@@ -44,6 +44,10 @@ final class DownloadItem: ObservableObject, Identifiable {
 
     /// Erstes Ergebnis automatisch wählen – nur bei der allerersten Suche.
     var allowAutoPick = true
+    /// Immer automatisch wählen (Spotify-Playlists), unabhängig von der Einstellung.
+    var forceAutoPick = false
+    /// Länge laut Spotify – hilft, die richtige Version zu wählen.
+    var expectedDuration: TimeInterval?
     /// Archiv für diesen einen Download ignorieren („Trotzdem laden“).
     var ignoreArchive = false
     /// Wird nach erfolgreichem Ersatz-Download gelöscht.

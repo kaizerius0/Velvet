@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -15,6 +16,9 @@ struct FolderScreen: View {
     @EnvironmentObject private var history: HistoryStore
     @EnvironmentObject private var navigation: AppNavigation
     @EnvironmentObject private var input: InputViewModel
+    @EnvironmentObject private var player: PreviewPlayer
+    @EnvironmentObject private var analysis: AnalysisCenter
+    @EnvironmentObject private var discover: DiscoverViewModel
 
     @State private var selection = Set<Track.ID>()
     @State private var filter = ""
@@ -31,6 +35,13 @@ struct FolderScreen: View {
                     .padding([.horizontal, .top], 20)
             }
             header
+            if let hint = source?.volume?.compatibilityHint {
+                Label(hint, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .bannerStyle(.orange)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+            }
             if !incoming.isEmpty {
                 incomingBanner
             }
@@ -118,10 +129,30 @@ struct FolderScreen: View {
                     .foregroundStyle(.green)
                     .lineLimit(1)
             }
+            if analysis.pendingCount > 0 {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Tempo & Tonart: noch \(analysis.pendingCount)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .help("Velvet ermittelt Tempo und Tonart und schreibt sie in die MP3-Dateien.")
+            }
             if library.tracks(in: sourceID, folderID: folderID).count > 12 {
                 TextField("Filtern", text: $filter)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 180)
+            }
+            if let folder, !library.tracks(in: sourceID, folderID: folderID).isEmpty {
+                Button {
+                    discover.extend(folder)
+                    navigation.selection = .discover
+                } label: {
+                    Label("Passende ergänzen", systemImage: "sparkles")
+                }
+                .disabled(!tools.isReady)
+                .help("Velvet sucht Titel, die zu diesem Ordner passen – mit Tempo und Tonart")
             }
             Button(action: openAdd) {
                 Label("Titel hinzufügen", systemImage: "plus")
@@ -139,11 +170,19 @@ struct FolderScreen: View {
             if let folderURL {
                 Button("Im Finder zeigen") { library.reveal([folderURL]) }
             }
+            Button("Tempo & Tonart ermitteln") {
+                analysis.enqueueMissing(library.tracks(in: sourceID, folderID: folderID))
+            }
+            .disabled(!tools.isReady)
+            .help("Ermittelt BPM und Tonart (Camelot) und schreibt sie in die MP3-Dateien")
+            Button("Für rekordbox exportieren …", action: exportRekordbox)
+                .help("rekordbox-XML mit allen Titeln, Tempo, Tonart und jedem Ordner als Playlist")
+            Divider()
             if let volume = source?.volume {
-                Button("Für das Auto aufräumen") { Task { await library.cleanForCar(sourceID) } }
-                    .help("Entfernt Mac-Begleitdateien (._*), die Autoradios als kaputte Titel zeigen")
+                Button("Für Auto & Mixer aufräumen") { Task { await library.cleanForCar(sourceID) } }
+                    .help("Entfernt Mac-Begleitdateien (._*), die Autoradios und Mixer als kaputte Titel zeigen")
                 Button("Auswerfen") { Task { await library.eject(sourceID) } }
-                    .disabled(queue.isWriting(to: volume.url))
+                    .disabled(queue.isWriting(to: volume.url) || analysis.isBusy(within: volume.url))
             } else if let folderURL, library.isMacFolder(folderURL) {
                 Divider()
                 Button("Aus der Seitenleiste entfernen") { library.removeMacFolder(folderURL) }
@@ -255,6 +294,21 @@ struct FolderScreen: View {
                     Text(track.title)
                 }
             }
+            TableColumn("BPM", value: \.bpmSortValue) { track in
+                let result = analysis.analysis(for: track)
+                if let bpm = result?.bpmText {
+                    Text(bpm).monospacedDigit()
+                } else if analysis.isAnalyzing(track.url) {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+            .width(min: 40, ideal: 50, max: 64)
+            TableColumn("Tonart", value: \.keySortValue) { track in
+                if let key = analysis.analysis(for: track)?.key {
+                    KeyBadge(key: key)
+                }
+            }
+            .width(min: 44, ideal: 54, max: 70)
             TableColumn("Ordner", value: \.folderName)
                 .width(min: 80, ideal: 140, max: 240)
             TableColumn("Format", value: \.format)
@@ -271,7 +325,7 @@ struct FolderScreen: View {
         .contextMenu(forSelectionType: Track.ID.self) { ids in
             trackMenu(for: library.trackIndex.map(\.track).filter { ids.contains($0.id) })
         } primaryAction: { ids in
-            library.trackIndex.first { ids.contains($0.track.id) }.map { library.play($0.track) }
+            library.trackIndex.first { ids.contains($0.track.id) }.map { play($0.track) }
         }
     }
 
@@ -290,11 +344,21 @@ struct FolderScreen: View {
     @ViewBuilder
     private func trackMenu(for selected: [Track]) -> some View {
         if selected.count == 1, let track = selected.first {
-            Button("Abspielen") { library.play(track) }
+            Button("Abspielen") { play(track) }
+            Button("In der Musik-App öffnen") { library.play(track) }
+            Button("Set daraus bauen") {
+                discover.startSet(from: track)
+                navigation.selection = .discover
+            }
+            .disabled(!tools.isReady)
             Button("Andere Version …") { startReplace(track) }
                 .disabled(!tools.isReady)
             Button("Umbenennen …") { renameTrack = track }
             Divider()
+        }
+        if !selected.isEmpty {
+            Button("Tempo & Tonart ermitteln") { analysis.enqueue(selected.filter(\.isAudio).map(\.url)) }
+                .disabled(!tools.isReady)
         }
         if !selected.isEmpty {
             moveMenu(for: selected)
@@ -357,6 +421,57 @@ struct FolderScreen: View {
         pendingDeletion.count == 1
             ? "„\(pendingDeletion[0].title)“ löschen?"
             : "\(pendingDeletion.count) Titel löschen?"
+    }
+
+    private func play(_ track: Track) {
+        player.play(file: track.url, title: track.title, subtitle: library.locationText(for: track.url))
+    }
+
+    /// rekordbox-XML: alle Titel dieser Bibliothek, jeder Ordner als Playlist.
+    private func exportRekordbox() {
+        guard let source else { return }
+        let tracks = library.tracks(in: sourceID).filter(\.isAudio)
+        let entries = tracks.map { track -> RekordboxExporter.Entry in
+            let version = TrackVersion.parse(track.title)
+            let result = analysis.analysis(for: track)
+            return RekordboxExporter.Entry(
+                url: track.url,
+                title: version.mix.map { "\(version.song) (\($0))" } ?? version.song,
+                artist: version.artist,
+                size: track.size,
+                bpm: result?.bpm,
+                key: result?.key
+            )
+        }
+        let playlists = library.folders(in: sourceID).compactMap { folder -> RekordboxExporter.Playlist? in
+            let urls = tracks.filter { $0.folderID == folder.id }.map(\.url)
+            return urls.isEmpty ? nil : RekordboxExporter.Playlist(name: folder.name, entries: urls)
+        }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
+        let xml = RekordboxExporter.xml(entries: entries, playlists: playlists, version: version)
+
+        let panel = NSSavePanel()
+        panel.title = "Für rekordbox exportieren"
+        panel.nameFieldStringValue = "Velvet – \(LibraryFiles.sanitizedName(source.name)).xml"
+        panel.allowedContentTypes = [.xml]
+        panel.directoryURL = source.volume?.url ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try xml.write(to: url, atomically: true, encoding: .utf8)
+            let alert = NSAlert()
+            alert.messageText = "rekordbox-Datei gespeichert"
+            alert.informativeText = """
+            \(Formatters.count(entries.count, "Titel", "Titel")) in \(Formatters.count(playlists.count, "Playlist", "Playlists")).
+
+            So kommen sie in rekordbox:
+            1. Einstellungen → Erweitert → Datenbank → „rekordbox xml“: diese Datei wählen.
+            2. Links in der Baumansicht erscheint „rekordbox xml“ (sonst unter Einstellungen → Ansicht einblenden).
+            3. Rechtsklick auf eine Playlist → importieren. Tempo und Tonart sind schon drin.
+            """
+            alert.runModal()
+        } catch {
+            library.errorMessage = "Die Datei konnte nicht gespeichert werden: \(error.localizedDescription)"
+        }
     }
 
     private func startReplace(_ track: Track) {

@@ -51,6 +51,11 @@ final class UIFlowSnapshotTests: XCTestCase {
                                        macFolders: [root.appendingPathComponent("Rock"), root.appendingPathComponent("Party")])
         let navigation = AppNavigation()
         let queue = QueueViewModel(settings: settings, tools: tools, history: history, library: library)
+        let taste = TasteStore(fileURL: root.appendingPathComponent(".discover-test.json"))
+        let analysis = AnalysisCenter(tools: tools, settings: settings, fileURL: root.appendingPathComponent(".analysis-test.json"))
+        let player = PreviewPlayer(tools: tools, settings: settings)
+        let discover = DiscoverViewModel(settings: settings, tools: tools, history: history, library: library, queue: queue,
+                                         taste: taste, analysis: analysis, cacheURL: root.appendingPathComponent(".cache-test.json"))
         let mac = LibrarySource.macID
         try await waitUntil("Bibliothek eingelesen") { library.revision > 0 && !library.isScanning(mac) }
         let rock = try XCTUnwrap(library.folders(in: mac).first { $0.name == "Rock" })
@@ -61,7 +66,8 @@ final class UIFlowSnapshotTests: XCTestCase {
             view
                 .environmentObject(settings).environmentObject(tools).environmentObject(input)
                 .environmentObject(queue).environmentObject(history).environmentObject(library)
-                .environmentObject(navigation)
+                .environmentObject(navigation).environmentObject(taste).environmentObject(analysis)
+                .environmentObject(player).environmentObject(discover)
                 .background(Color(nsColor: .windowBackgroundColor))
         }
 
